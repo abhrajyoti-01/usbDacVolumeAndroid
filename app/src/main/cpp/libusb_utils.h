@@ -152,13 +152,19 @@ static void print_configuration(struct libusb_config_descriptor *config)
 static std::string get_device_name(libusb_device *dev, libusb_device_handle *handle)
 {
     struct libusb_device_descriptor desc{};
-    unsigned char productString[50];
+    unsigned char productString[50] = {};
 
     int ret = libusb_get_device_descriptor(dev, &desc);
-    ret = libusb_get_string_descriptor_ascii(handle, desc.iProduct, productString, sizeof(productString));
-    std::string productName(productString, productString+sizeof(productString)/sizeof(productString[0]));
+    if (ret < 0 || desc.iProduct == 0) {
+        return "USB Device";
+    }
 
-    return productName;
+    ret = libusb_get_string_descriptor_ascii(handle, desc.iProduct, productString, sizeof(productString) - 1);
+    if (ret <= 0) {
+        return "USB Device";
+    }
+
+    return std::string(reinterpret_cast<char*>(productString), (size_t) ret);
 }
 
 static void print_device(libusb_device *dev, libusb_device_handle *handle)

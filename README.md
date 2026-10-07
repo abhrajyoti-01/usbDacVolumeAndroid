@@ -2,7 +2,9 @@
 
 Simple application to set the USB DAC volume on UNROOTED Android Devices
 
-[DOWNLOAD](https://github.com/guyman624/usbDacVolumeAndroid/releases/download/release-1.0/app-debug.apk)
+[DOWNLOAD](https://github.com/abhrajyoti-01/usbDacVolumeAndroid/releases/download/release-1.2/app-debug.apk)
+
+> **This fork** by [abhrajyoti-01](https://github.com/abhrajyoti-01/usbDacVolumeAndroid): fixes Samsung Galaxy S24 Ultra / Android 15-16 (One UI 7/8) compatibility, including the permission/relaunch crash loop and the "no sound after Apply" problem (the kernel `snd-usb-audio` driver is now re-attached by resetting the DAC after the volume is set).
 
 # Why
 The vast majority of high end android smartphones sold today do not contain a 3.5mm headphone jack. To remedy this, most people will use a USB-C to 3.5mm DAC. However, there are certian DACs (namely the Apple USB- C DAC) that do not default to their highest output setting. On most platforms (Windows, Linux, macOS, iOS), this isn't an issue because they either force the highest DAC volume and adjust their own mixer volume, or they control the DAC volume explicitly. Android does neither, so as a result, some DACs are quieter than they possibly can be.
@@ -12,8 +14,17 @@ The vast majority of high end android smartphones sold today do not contain a 3.
  - OnePlus 7T/Android10/12 (Working)
  - Pixel 3/Android 11 (Working)
  - Galaxy A34/Android 14 (Working)
+ - Galaxy S24 Ultra/Android 16/One UI 8 (Working - this fork)
+ - Samsung Galaxy A56/Android 15 (Working - this fork)
  - Huawei P20/Android 10 (NOT WORKING... Unknown reason...)
  - Maybe more? Let me know.
+
+# What was fixed in this fork
+ - Galaxy S24 Ultra / Android 15-16 (One UI 7/8) support (targetSdk 36, 16 KB page size, modern NDK).
+ - USB permission prompt no longer loops or crashes the app (explicit mutable `PendingIntent`, proper receiver export flags, `singleTask` launch mode).
+ - "No sound after Apply" fixed: the DAC is reset after the volume is written so the kernel audio driver is re-attached and playback keeps working.
+ - Null/endpointless device, invalid file descriptor and permission-denied crashes guarded.
+ - Crash-free when other USB devices (keyboards, etc.) are attached while a DAC is connected.
 
 # Usage
 Launch the application, and connect your DAC. 
@@ -34,6 +45,14 @@ Once you have accepted, you should see this:<br>
 
 You will temporarily lose sound during the setting of volume, however you should be able to restart playback after it has beens set. Please be aware that this setting is only saved until you unplug the headphones.
 
+# Building
+```
+git submodule update --init --recursive
+./gradlew assembleDebug
+```
+The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
+Requires JDK 17+, Android SDK with API 36 platform, NDK 27.1 and CMake.
 
 # Special thanks to:
 [ibaiGorordo](https://github.com/ibaiGorordo/libusbAndroidTest) for most of the code :>
+And [abhrajyoti-01](https://github.com/abhrajyoti-01) for the Samsung Galaxy S24 Ultra / Android 16 fixes.
