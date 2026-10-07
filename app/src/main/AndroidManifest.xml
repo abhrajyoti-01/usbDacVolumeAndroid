@@ -24,14 +24,46 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
 
+        <!--
+            Invisible handler for USB device attach events. The system starts
+            it when a DAC is plugged in; it never shows a window and finishes
+            immediately. It also makes the app eligible for the "always use"
+            USB permission checkbox. The component is disabled by default and
+            only enabled while automatic mode is selected, so with automatic
+            mode off plugging a DAC launches nothing at all.
+        -->
+        <activity
+            android:name="com.example.libusbAndroidTest.UsbAttachActivity"
+            android:enabled="false"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@style/Theme.USBTransparent"
+            android:taskAffinity="">
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
             </intent-filter>
 
-            <meta-data android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
                 android:resource="@xml/device_filter" />
         </activity>
+
+        <!-- Receives the USB permission dialog result (explicit broadcast). -->
+        <receiver
+            android:name="com.example.libusbAndroidTest.UsbPermissionReceiver"
+            android:exported="false" />
+
+        <!-- Tracks real unplug events (protected system broadcast). -->
+        <receiver
+            android:name="com.example.libusbAndroidTest.UsbDetachReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_DETACHED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

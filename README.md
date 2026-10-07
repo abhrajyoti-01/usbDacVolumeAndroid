@@ -26,6 +26,14 @@ The vast majority of high end android smartphones sold today do not contain a 3.
  - Null/endpointless device, invalid file descriptor and permission-denied crashes guarded.
  - Crash-free when other USB devices (keyboards, etc.) are attached while a DAC is connected.
 
+# Automatic (invisible) mode
+Tick **Automatic (invisible)** in the app and keep **"Always use for this device"** checked on the one-time USB permission popup. From then on:
+ - The app never opens a window when a DAC is connected - the volume is applied silently in the background.
+ - The volume is applied exactly once per connection, so the USB reset cannot cause a connect/disconnect loop ("blinking" sound).
+ - If the app is not running at all when the DAC is plugged in, nothing is launched and no interface appears.
+
+Note: while a DAC is plugged in, Android may show its normal "USB device connected" notification; that is a system notification, not this app.
+
 # Usage
 Launch the application, and connect your DAC. 
 You should recieve a prompt asking to give USB Permission to the application. Press OK.

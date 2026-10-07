@@ -107,9 +107,9 @@ void setVolume(int fileDescriptor, unsigned char *data, int length) {
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_example_libusbAndroidTest_MainActivity_initializeNativeDevice(
+Java_com_example_libusbAndroidTest_UsbNative_initializeNativeDevice(
         JNIEnv *env,
-        jobject /* this */,
+        jclass /* clazz */,
         jint fileDescriptor) {
 
 
@@ -120,9 +120,9 @@ Java_com_example_libusbAndroidTest_MainActivity_initializeNativeDevice(
 
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_example_libusbAndroidTest_MainActivity_setDeviceVolume(
+Java_com_example_libusbAndroidTest_UsbNative_setDeviceVolume(
         JNIEnv *env,
-        jobject /* this */,
+        jclass /* clazz */,
         jint fileDescriptor,
         jbyteArray volume) {
 
