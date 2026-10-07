@@ -2,7 +2,7 @@
 
 Simple application to set the USB DAC volume on UNROOTED Android Devices
 
-[DOWNLOAD](https://github.com/abhrajyoti-01/usbDacVolumeAndroid/releases/download/release-1.2/app-debug.apk)
+[DOWNLOAD](https://github.com/abhrajyoti-01/usbDacVolumeAndroid/releases/download/release-1.3/app-debug.apk)
 
 > **This fork** fixes Samsung Galaxy S24 Ultra / Android 15-16 (One UI 7/8) compatibility, including the permission/relaunch crash loop and the "no sound after Apply" problem (the kernel `snd-usb-audio` driver is now re-attached by resetting the DAC after the volume is set).
 
@@ -34,24 +34,19 @@ Tick **Automatic (invisible)** in the app and keep **"Always use for this device
 
 Note: while a DAC is plugged in, Android may show its normal "USB device connected" notification; that is a system notification, not this app.
 
-# Usage
-Launch the application, and connect your DAC. 
-You should recieve a prompt asking to give USB Permission to the application. Press OK.
+# Usage without automatic mode
+ - The top text input is the HEXADECIMAL value to send to the dongle. Leave this as 0000 for 100% volume.
+ - Auto Apply on Start means that the new value will be sent to the dongle immediately upon detection.
+ - Apply will set the volume on the device.
+ - The bottom is the name of the detected USB Device.
+
+On first launch, connect your DAC and accept the USB permission prompt:
 <img src="https://github.com/guyman624/usbDacVolumeAndroid/assets/82007920/48d92739-bc2a-406b-853c-a14bf6f1228a" width="512">
 
 Once you have accepted, you should see this:<br>
 <img src="https://github.com/guyman624/usbDacVolumeAndroid/assets/82007920/b9e5bdfe-7f91-4eb1-b846-b6d6fb4a7216" width="512">
 
-
-- The top text input is the HEXADECIMAL value to send to the dongle. Leave this as 0000 for 100% volume.
-
-- Auto Apply on Start means that the new value will be sent to the dongle immidiately upon detection.
-
-- Apply will set the volume on the device.
-
-- The bottom is the name of the detected USB Device.
-
-You will temporarily lose sound during the setting of volume, however you should be able to restart playback after it has beens set. Please be aware that this setting is only saved until you unplug the headphones.
+You will temporarily lose sound during the setting of volume, however you should be able to restart playback after it has been set. Please be aware that this setting is only saved until you unplug the headphones.
 
 # Building
 ```
