@@ -4,7 +4,7 @@ Simple application to set the USB DAC volume on UNROOTED Android Devices
 
 [DOWNLOAD](https://github.com/abhrajyoti-01/usbDacVolumeAndroid/releases/download/release-1.2/app-debug.apk)
 
-> **This fork** by [abhrajyoti-01](https://github.com/abhrajyoti-01/usbDacVolumeAndroid): fixes Samsung Galaxy S24 Ultra / Android 15-16 (One UI 7/8) compatibility, including the permission/relaunch crash loop and the "no sound after Apply" problem (the kernel `snd-usb-audio` driver is now re-attached by resetting the DAC after the volume is set).
+> **This fork** fixes Samsung Galaxy S24 Ultra / Android 15-16 (One UI 7/8) compatibility, including the permission/relaunch crash loop and the "no sound after Apply" problem (the kernel `snd-usb-audio` driver is now re-attached by resetting the DAC after the volume is set).
 
 # Why
 The vast majority of high end android smartphones sold today do not contain a 3.5mm headphone jack. To remedy this, most people will use a USB-C to 3.5mm DAC. However, there are certian DACs (namely the Apple USB- C DAC) that do not default to their highest output setting. On most platforms (Windows, Linux, macOS, iOS), this isn't an issue because they either force the highest DAC volume and adjust their own mixer volume, or they control the DAC volume explicitly. Android does neither, so as a result, some DACs are quieter than they possibly can be.
@@ -55,4 +55,5 @@ Requires JDK 17+, Android SDK with API 36 platform, NDK 27.1 and CMake.
 
 # Special thanks to:
 [ibaiGorordo](https://github.com/ibaiGorordo/libusbAndroidTest) for most of the code :>
-And [abhrajyoti-01](https://github.com/abhrajyoti-01) for the Samsung Galaxy S24 Ultra / Android 16 fixes.
+
+[polhdez](https://github.com/polhdez) for the improved permission handling, the auto-quit toggle, the settings saving fix and the app icon.
