@@ -41,10 +41,12 @@ The vast majority of high end android smartphones sold today do not contain a 3.
  - **No permissions** are declared except `RECORD_AUDIO` (used only to suppress the USB audio-capture warning) and USB host. The app never accesses the network, storage, contacts, location or any other data.
 
 # Automatic (invisible) mode
-Tick **Automatic (invisible)** in the app and keep **"Always use for this device"** checked on the one-time USB permission popup. From then on:
- - The app never opens a window when a DAC is connected - the volume is applied silently in the background.
+Tick **Automatic (invisible)** in the app, then on the **first** USB dialog for each headphone model tick **"Always allow"**. From then on:
+ - The app never opens a window when that headphone/IEM is connected - the volume is applied silently in the background.
  - The volume is applied exactly once per connection, so the USB reset cannot cause a connect/disconnect loop ("blinking" sound).
  - If the app is not running at all when the DAC is plugged in, nothing is launched and no interface appears.
+
+**Why the USB dialog still shows up once per device model:** Android only remembers the USB permission per *device* (vendor/product ID), tied to the "Always allow" checkbox. This is an OS security boundary - no app can grant itself this permission or skip the dialog. Tick "Always allow" and it will not appear again for that device. Wired headphones/IEMs that report a different model each get their own one-time prompt. The checkbox is only offered when the app holds the microphone permission, so the app asks for it before requesting USB access (needed because these headsets report an audio capture interface).
 
 Note: while a DAC is plugged in, Android may show its normal "USB device connected" notification; that is a system notification, not this app.
 

@@ -288,8 +288,16 @@ public class MainActivity extends AppCompatActivity {
         UsbController.setPermissionListener(permissionListener);
 
         clearAppCache();
-        requestRecordAudioPermission();
-        checkUsbDevices();
+
+        // Android only shows the "Always allow" checkbox in the USB dialog
+        // when the app already holds RECORD_AUDIO (the Earpods report audio
+        // capture). Ask for it first, then continue with the USB flow once the
+        // user answered.
+        if (hasRecordAudioPermission()) {
+            checkUsbDevices();
+        } else {
+            requestRecordAudioPermission();
+        }
     }
 
     /**
@@ -341,9 +349,13 @@ public class MainActivity extends AppCompatActivity {
         super.onDestroy();
     }
 
+    private boolean hasRecordAudioPermission() {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
     private void requestRecordAudioPermission() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-                != PackageManager.PERMISSION_GRANTED) {
+        if (!hasRecordAudioPermission()) {
             ActivityCompat.requestPermissions(this,
                     new String[]{Manifest.permission.RECORD_AUDIO},
                     UsbController.RECORD_AUDIO_PERMISSION_CODE);
@@ -359,6 +371,8 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 Log.d(TAG, "RECORD_AUDIO permission denied");
             }
+            // Continue the USB flow now that the dialog is (or was) answered.
+            checkUsbDevices();
         }
     }
 

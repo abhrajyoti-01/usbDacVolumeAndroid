@@ -69,7 +69,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
-        android:text="When enabled, the app never opens a window. Keep &quot;Always use&quot; checked on the USB permission popup so it keeps working invisibly."
+        android:text="When enabled, the app never opens a window. On the first USB dialog tick &quot;Always allow&quot;: from then on the volume is applied automatically for the same headphones/IEM (no popup again). Android still asks once per new device model - that is a system security rule no app can skip."
         android:textSize="12sp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
