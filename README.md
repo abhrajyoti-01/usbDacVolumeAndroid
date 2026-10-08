@@ -2,7 +2,7 @@
 
 Simple application to set the USB DAC volume on UNROOTED Android Devices
 
-[DOWNLOAD](https://github.com/abhrajyoti-01/usbDacVolumeAndroid/releases/download/release-1.3/app-debug.apk)
+[DOWNLOAD](https://github.com/abhrajyoti-01/usbDacVolumeAndroid/releases/download/release-1.4/app-debug.apk)
 
 > **This fork** fixes Samsung Galaxy S24 Ultra / Android 15-16 (One UI 7/8) compatibility, including the permission/relaunch crash loop and the "no sound after Apply" problem (the kernel `snd-usb-audio` driver is now re-attached by resetting the DAC after the volume is set).
 
@@ -25,6 +25,9 @@ The vast majority of high end android smartphones sold today do not contain a 3.
  - "No sound after Apply" fixed: the DAC is reset after the volume is written so the kernel audio driver is re-attached and playback keeps working.
  - Null/endpointless device, invalid file descriptor and permission-denied crashes guarded.
  - Crash-free when other USB devices (keyboards, etc.) are attached while a DAC is connected.
+ - No more "app is crashing frequently" (Device care): all native USB calls now run on a single serialized background thread instead of the UI thread, and no connection/file descriptor is kept open between operations.
+ - The app clears its own cache automatically on every launch.
+ - The permission dialog is not shown again after the app's own USB reset.
 
 # Automatic (invisible) mode
 Tick **Automatic (invisible)** in the app and keep **"Always use for this device"** checked on the one-time USB permission popup. From then on:

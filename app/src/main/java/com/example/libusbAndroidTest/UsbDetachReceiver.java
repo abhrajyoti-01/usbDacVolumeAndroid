@@ -17,14 +17,19 @@ public class UsbDetachReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (intent == null || !UsbManager.ACTION_USB_DEVICE_DETACHED.equals(intent.getAction())) {
-            return;
+        try {
+            if (intent == null
+                    || !UsbManager.ACTION_USB_DEVICE_DETACHED.equals(intent.getAction())) {
+                return;
+            }
+            UsbDevice device = UsbController.getUsbDeviceExtra(intent);
+            if (device == null) {
+                return;
+            }
+            UsbController.clearRequested(device);
+            UsbController.onDetach(device);
+        } catch (Throwable t) {
+            android.util.Log.e("USB DAC Volume Adjustment", "detach handling failed", t);
         }
-        UsbDevice device = UsbController.getUsbDeviceExtra(intent);
-        if (device == null) {
-            return;
-        }
-        UsbController.clearRequested(device);
-        UsbController.onDetach(device);
     }
 }

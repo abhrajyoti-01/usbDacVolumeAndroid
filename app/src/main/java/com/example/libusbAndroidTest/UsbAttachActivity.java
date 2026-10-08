@@ -3,8 +3,6 @@ package com.example.libusbAndroidTest;
 import android.app.Activity;
 import android.hardware.usb.UsbDevice;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 
 /**
  * Invisible entry point for USB device attach events. The system starts this
@@ -13,8 +11,6 @@ import android.os.Looper;
  * connect. The component is only enabled while automatic mode is on.
  */
 public class UsbAttachActivity extends Activity {
-
-    private final Handler handler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -31,28 +27,23 @@ public class UsbAttachActivity extends Activity {
     }
 
     private void handleIntent() {
+        // A re-attach caused by our own volume reset must not do anything at
+        // all - in particular it must not ask for permission again.
+        if (UsbController.isInResetWindow()) {
+            finish();
+            return;
+        }
+
         UsbDevice device = UsbController.getUsbDeviceExtra(getIntent());
         if (device == null) {
             finish();
             return;
         }
-
-        // Only audio devices (or a single attached device) are interesting.
-        // Everything else is ignored invisibly.
         if (!UsbController.isAudioDevice(device)
                 && !UsbController.isSingleAttachedDevice(this, device)) {
             finish();
             return;
         }
-
-        if (!UsbController.hasPermission(this, device)) {
-            // The permission dialog is handled by the system; the result is
-            // delivered to UsbPermissionReceiver, so nothing here to wait for.
-            UsbController.requestPermission(this, device);
-            finish();
-            return;
-        }
-
         if (!UsbController.isSilentMode(this)) {
             finish();
             return;
@@ -60,8 +51,10 @@ public class UsbAttachActivity extends Activity {
 
         UsbController.noteAttach(device);
 
-        if (UsbController.isInResetWindow()) {
-            // Re-attach caused by our own volume write, nothing to do.
+        if (!UsbController.hasPermission(this, device)) {
+            // Ask once; the request is deduplicated inside the controller, and
+            // the result is delivered to UsbPermissionReceiver.
+            UsbController.requestPermission(this, device);
             finish();
             return;
         }
@@ -69,11 +62,5 @@ public class UsbAttachActivity extends Activity {
         // Apply in the background and finish as soon as it is done. The
         // activity itself never has a visible window.
         UsbController.silentApply(this, device, this::finish);
-    }
-
-    @Override
-    protected void onDestroy() {
-        handler.removeCallbacksAndMessages(null);
-        super.onDestroy();
     }
 }

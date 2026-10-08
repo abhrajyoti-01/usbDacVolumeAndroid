@@ -13,7 +13,6 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.hardware.usb.UsbDevice;
-import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
 import android.os.Bundle;
 import android.os.Handler;
@@ -27,6 +26,7 @@ import android.widget.Toast;
 
 import com.example.libusbAndroidTest.databinding.ActivityMainBinding;
 
+import java.io.File;
 import java.util.HashMap;
 
 public class MainActivity extends AppCompatActivity {
@@ -40,18 +40,15 @@ public class MainActivity extends AppCompatActivity {
     private CheckBox autoApply;
     private CheckBox automatic;
 
-    private int deviceDescriptor = -1;
-
-    // Keep strong references: if the connection is garbage collected the
-    // file descriptor is closed and later native calls use a dead fd.
-    private UsbDeviceConnection connection;
+    // The currently known DAC. No UsbDeviceConnection / file descriptor is kept
+    // open here: every volume write opens its own connection on the USB worker
+    // thread, which prevents stale-descriptor crashes.
     private UsbDevice connectedDevice;
 
     private boolean receiverRegistered = false;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private UsbDevice pendingDetached;
-    private boolean pendingReconnect = false;
 
     private static final String TAG = "USB DAC Volume Adjustment";
     private static final long VERIFY_DISCONNECT_DELAY_MS = 1000;
@@ -59,58 +56,51 @@ public class MainActivity extends AppCompatActivity {
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            String action = intent.getAction();
-            if (action == null) {
+            try {
+                handleUsbBroadcast(intent);
+            } catch (Throwable t) {
+                Log.e(TAG, "usb broadcast failed", t);
+            }
+        }
+    };
+
+    private void handleUsbBroadcast(Intent intent) {
+        String action = intent.getAction();
+        if (action == null) {
+            return;
+        }
+
+        if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(action)) {
+            if (UsbController.isInResetWindow()) {
+                // Attach caused by our own volume reset, keep the connection.
                 return;
             }
-
-            if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(action)) {
-                if (UsbController.isInResetWindow()) {
-                    // Attach caused by our own volume reset, keep the connection.
-                    return;
-                }
-                UsbDevice device = UsbController.getUsbDeviceExtra(intent);
-                if (device != null) {
-                    UsbController.noteAttach(device);
-                }
-                if (device != null && isTargetDevice(device)) {
-                    if (usbManager.hasPermission(device)) {
-                        connectDevice(device, false);
-                    } else {
-                        tv.setText("Waiting for USB permission...");
-                        tv.setBackgroundColor(Color.TRANSPARENT);
-                        UsbController.requestPermission(MainActivity.this, device);
-                    }
-                }
-            } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
-                if (UsbController.isInResetWindow()) {
-                    // Detach caused by our own volume reset, keep the connection.
-                    return;
-                }
-                UsbDevice device = UsbController.getUsbDeviceExtra(intent);
-                if (device != null) {
-                    pendingDetached = device;
-                    handler.removeCallbacks(verifyDisconnect);
-                    handler.postDelayed(verifyDisconnect, VERIFY_DISCONNECT_DELAY_MS);
+            UsbDevice device = UsbController.getUsbDeviceExtra(intent);
+            if (device != null) {
+                UsbController.noteAttach(device);
+            }
+            if (device != null && isTargetDevice(device)) {
+                if (usbManager.hasPermission(device)) {
+                    connectDevice(device);
+                } else {
+                    tv.setText("Waiting for USB permission...");
+                    tv.setBackgroundColor(Color.TRANSPARENT);
+                    UsbController.requestPermission(this, device);
                 }
             }
+        } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
+            if (UsbController.isInResetWindow()) {
+                // Detach caused by our own volume reset, keep the connection.
+                return;
+            }
+            UsbDevice device = UsbController.getUsbDeviceExtra(intent);
+            if (device != null) {
+                pendingDetached = device;
+                handler.removeCallbacks(verifyDisconnect);
+                handler.postDelayed(verifyDisconnect, VERIFY_DISCONNECT_DELAY_MS);
+            }
         }
-    };
-
-    private final Runnable reconnectAfterReset = () -> {
-        if (!pendingReconnect) {
-            return;
-        }
-        pendingReconnect = false;
-        UsbDevice device = connectedDevice;
-        if (device == null) {
-            return;
-        }
-        UsbDevice present = UsbController.findPresentDevice(this, device);
-        if (present != null) {
-            connectDevice(present, true);
-        }
-    };
+    }
 
     private final Runnable verifyDisconnect = () -> {
         UsbDevice detached = pendingDetached;
@@ -123,15 +113,14 @@ public class MainActivity extends AppCompatActivity {
         // within a moment. Verify it is really gone before telling the user.
         UsbDevice present = UsbController.findPresentDevice(this, detached);
         if (present != null) {
-            if (connectedDevice != null && UsbController.isSameDevice(present, connectedDevice)) {
-                connectDevice(present, true);
+            if (connectedDevice == null || UsbController.isSameDevice(present, connectedDevice)) {
+                connectDevice(present);
             }
             return;
         }
 
         if (connectedDevice != null && UsbController.isSameDevice(detached, connectedDevice)) {
-            handler.removeCallbacks(reconnectAfterReset);
-            resetConnection();
+            connectedDevice = null;
             tv.setText("USB device disconnected");
             tv.setBackgroundColor(Color.TRANSPARENT);
         }
@@ -142,7 +131,7 @@ public class MainActivity extends AppCompatActivity {
                 UsbController.clearRequested(device);
                 if (granted) {
                     if (device != null) {
-                        connectDevice(device, false);
+                        connectDevice(device);
                     }
                 } else {
                     tv.setText("USB permission denied");
@@ -158,80 +147,37 @@ public class MainActivity extends AppCompatActivity {
         return manager != null && manager.getDeviceList().size() == 1;
     }
 
-    private void resetConnection() {
-        if (connection != null) {
-            connection.close();
-            connection = null;
-        }
-        connectedDevice = null;
-        deviceDescriptor = -1;
-    }
-
-    private void scheduleReconnectAfterReset() {
-        pendingReconnect = true;
-        handler.removeCallbacks(reconnectAfterReset);
-        handler.postDelayed(reconnectAfterReset, UsbController.RESET_WINDOW_MS + 600);
-    }
-
-    private void connectDevice(UsbDevice device, boolean afterReset)
-    {
+    /**
+     * Refreshes the device name in the background. All native work runs on the
+     * serialized USB worker thread so it can never race with a volume write.
+     */
+    private void connectDevice(UsbDevice device) {
         if (device == null || !usbManager.hasPermission(device)) {
             return;
         }
-        if (!afterReset && connectedDevice != null
-                && connectedDevice.getDeviceId() == device.getDeviceId()
-                && deviceDescriptor >= 0) {
-            return;
-        }
-        if (device.getInterfaceCount() == 0) {
-            Log.e(TAG, "Device has no interfaces");
-            tv.setText("Device has no interfaces");
-            tv.setBackgroundColor(Color.RED);
+        if (connectedDevice != null && UsbController.isSameDevice(device, connectedDevice)) {
             return;
         }
 
-        // Do not claim the interface here. The native layer only claims it
-        // while setting the volume and re-attaches the kernel audio driver
-        // afterwards.
-        UsbDeviceConnection conn = usbManager.openDevice(device);
-        if (conn == null) {
-            Log.e(TAG, "Failed to open device connection");
-            tv.setText("Failed to open device");
-            tv.setBackgroundColor(Color.RED);
+        final Context appContext = getApplicationContext();
+        UsbController.runOnUsbThread(() -> {
+            final String name = UsbController.openDeviceName(appContext, device, null);
+            handler.post(() -> onDeviceConnected(device, name));
+        });
+    }
+
+    private void onDeviceConnected(UsbDevice device, String name) {
+        if (isFinishing() || isDestroyed()) {
             return;
         }
-
-        int fileDescriptor = conn.getFileDescriptor();
-        if (fileDescriptor < 0) {
-            Log.e(TAG, "Invalid file descriptor");
-            conn.close();
-            tv.setText("Failed to open device");
-            tv.setBackgroundColor(Color.RED);
-            return;
-        }
-
-        String deviceName;
-        try {
-            deviceName = UsbNative.initializeNativeDevice(fileDescriptor);
-        } catch (Throwable t) {
-            Log.e(TAG, "Failed to initialize native USB device", t);
-            conn.close();
-            tv.setText("Failed to open device");
-            tv.setBackgroundColor(Color.RED);
-            return;
-        }
-
-        resetConnection();
-        connection = conn;
         connectedDevice = device;
-        deviceDescriptor = fileDescriptor;
-
-        tv.setText(deviceName != null && !deviceName.isEmpty() ? deviceName : "USB Device");
+        tv.setText(name != null && !name.isEmpty() ? name : "USB Device");
         tv.setBackgroundColor(Color.TRANSPARENT);
 
-        // When automatic mode is on the background component normally performs
-        // the apply; whoever runs first wins thanks to the shared guard.
-        boolean shouldApply = (UsbController.isSilentMode(this) || autoApply.isChecked())
+        // Manual "Auto Apply on Start" also works while the UI is open.
+        // Automatic mode is handled by the background component; whoever runs
+        // first wins thanks to the shared per-connection guard.
+        boolean shouldApply = (autoApply.isChecked() || UsbController.isSilentMode(this))
                 && !UsbController.isInResetWindow()
                 && UsbController.acquireApply(device);
 
@@ -241,7 +187,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applyVolume(boolean fromUser) {
-        if (deviceDescriptor < 0 || connection == null) {
+        String volume = volInput.getText().toString();
+        if (!volume.matches("[0-9A-Fa-f]{4}")) {
+            volInput.setBackgroundColor(Color.RED);
+            return;
+        }
+        if (connectedDevice == null) {
             if (fromUser) {
                 tv.setText("No USB device connected");
                 tv.setBackgroundColor(Color.RED);
@@ -249,43 +200,32 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        String volume = volInput.getText().toString();
-        if (!volume.matches("[0-9A-Fa-f]{4}")) {
-            volInput.setBackgroundColor(Color.RED);
-            return;
-        }
+        final UsbDevice device = connectedDevice;
+        final Context appContext = getApplicationContext();
 
-        // The native call resets the USB device, so everything that happens in
-        // the next seconds is part of this write, not a real disconnect.
-        UsbController.beginVolumeWrite();
-        if (connectedDevice != null) {
-            UsbController.acquireApply(connectedDevice);
-        }
+        UsbController.markApplied(device);
+        volInput.setBackgroundColor(Color.TRANSPARENT);
 
-        try {
-            UsbNative.setDeviceVolume(deviceDescriptor, UsbController.hexStringToByteArray(volume));
-            volInput.setBackgroundColor(Color.TRANSPARENT);
-            scheduleReconnectAfterReset();
-        } catch (Throwable t) {
-            Log.e(TAG, "applyVolume failed", t);
-            volInput.setBackgroundColor(Color.RED);
-            return;
-        }
-
-        if (!fromUser) {
-            return;
-        }
-
-        Toast.makeText(getApplicationContext(), "Volume set for DAC!", Toast.LENGTH_SHORT).show();
-
-        SharedPreferences settings = UsbController.prefs(this);
-        if (!settings.getString("volume", "").equals(volume)) {
-            settings.edit().putString("volume", volume).apply();
-        }
+        UsbController.runOnUsbThread(
+                () -> UsbController.writeVolume(appContext, device, volume),
+                () -> {
+                    if (fromUser) {
+                        Toast.makeText(getApplicationContext(),
+                                "Volume set for DAC!", Toast.LENGTH_SHORT).show();
+                        SharedPreferences settings = UsbController.prefs(this);
+                        if (!settings.getString("volume", "").equals(volume)) {
+                            settings.edit().putString("volume", volume).apply();
+                        }
+                    }
+                });
     }
 
-    private void checkUsbDevices()
-    {
+    private void checkUsbDevices() {
+        if (usbManager == null) {
+            tv.setText("USB host not supported");
+            tv.setBackgroundColor(Color.RED);
+            return;
+        }
         HashMap<String, UsbDevice> deviceList = usbManager.getDeviceList();
         if (deviceList.isEmpty()) {
             tv.setText("No USB device connected");
@@ -310,7 +250,8 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if (usbManager.hasPermission(target)) {
-            connectDevice(target, false);
+            UsbDevice present = UsbController.findPresentDevice(this, target);
+            connectDevice(present != null ? present : target);
         } else {
             tv.setText("Waiting for USB permission...");
             tv.setBackgroundColor(Color.TRANSPARENT);
@@ -346,8 +287,46 @@ public class MainActivity extends AppCompatActivity {
 
         UsbController.setPermissionListener(permissionListener);
 
+        clearAppCache();
         requestRecordAudioPermission();
         checkUsbDevices();
+    }
+
+    /**
+     * Clears the app's own cache directory on every launch. This keeps the
+     * cache from growing and stops system tools (Device care) from suggesting
+     * a manual cache clear.
+     */
+    private void clearAppCache() {
+        new Thread(() -> {
+            try {
+                deleteDirContents(getCacheDir());
+                deleteDirContents(getExternalCacheDir());
+            } catch (Throwable t) {
+                Log.w(TAG, "cache clear failed", t);
+            }
+        }, "cache-clear").start();
+    }
+
+    private static void deleteDirContents(File dir) {
+        if (dir == null) {
+            return;
+        }
+        File[] files = dir.listFiles();
+        if (files == null) {
+            return;
+        }
+        for (File file : files) {
+            if (file.isDirectory()) {
+                // Never delete the code cache, it holds JIT profiles.
+                if ("code_cache".equals(file.getName())) {
+                    continue;
+                }
+                deleteDirContents(file);
+            }
+            //noinspection ResultOfMethodCallIgnored
+            file.delete();
+        }
     }
 
     @Override
@@ -358,7 +337,7 @@ public class MainActivity extends AppCompatActivity {
             unregisterReceiver(usbReceiver);
             receiverRegistered = false;
         }
-        resetConnection();
+        connectedDevice = null;
         super.onDestroy();
     }
 
@@ -384,22 +363,34 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void applyButtonPressed(View view) {
-        applyVolume(true);
+        try {
+            applyVolume(true);
+        } catch (Throwable t) {
+            Log.e(TAG, "apply failed", t);
+        }
     }
 
     public void checkboxPressed(View view) {
-        UsbController.prefs(this).edit()
-                .putBoolean("autoApply", autoApply.isChecked())
-                .apply();
+        try {
+            UsbController.prefs(this).edit()
+                    .putBoolean("autoApply", autoApply.isChecked())
+                    .apply();
+        } catch (Throwable t) {
+            Log.e(TAG, "checkbox failed", t);
+        }
     }
 
     public void automaticCheckboxPressed(View view) {
-        boolean enabled = automatic.isChecked();
-        UsbController.setAutomatic(this, enabled);
-        if (enabled) {
-            // Ask for permission now so the "always use" option can be chosen;
-            // from then on everything happens invisible in the background.
-            checkUsbDevices();
+        try {
+            boolean enabled = automatic.isChecked();
+            UsbController.setAutomatic(this, enabled);
+            if (enabled) {
+                // Ask for permission now so the "always use" option can be chosen;
+                // from then on everything happens invisible in the background.
+                checkUsbDevices();
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "automatic checkbox failed", t);
         }
     }
 }

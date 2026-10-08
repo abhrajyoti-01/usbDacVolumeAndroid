@@ -1,10 +1,15 @@
 #include <jni.h>
 #include <string>
+#include <mutex>
 
 #include "libusb_utils.h"
 #include <assert.h>
 
 static bool g_libusbInitialized = false;
+
+// All native USB operations are serialized. Concurrent access to the same
+// file descriptor / libusb state causes native crashes.
+static std::mutex g_usbMutex;
 
 static int ensureLibusbInitialized() {
     if (g_libusbInitialized) {
@@ -112,6 +117,7 @@ Java_com_example_libusbAndroidTest_UsbNative_initializeNativeDevice(
         jclass /* clazz */,
         jint fileDescriptor) {
 
+    std::lock_guard<std::mutex> lock(g_usbMutex);
 
     std::string deviceName = connect_device(fileDescriptor);
 
@@ -125,6 +131,8 @@ Java_com_example_libusbAndroidTest_UsbNative_setDeviceVolume(
         jclass /* clazz */,
         jint fileDescriptor,
         jbyteArray volume) {
+
+    std::lock_guard<std::mutex> lock(g_usbMutex);
 
     jsize length = env->GetArrayLength(volume);
     if (length <= 0 || length > 8) {

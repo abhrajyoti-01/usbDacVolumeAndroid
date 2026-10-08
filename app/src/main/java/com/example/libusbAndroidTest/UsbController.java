@@ -17,12 +17,14 @@ import android.util.Log;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class UsbController {
 
     public static final String ACTION_USB_PERMISSION = "com.android.example.USB_PERMISSION";
 
-    public static final long RESET_WINDOW_MS = 6000;
+    public static final long RESET_WINDOW_MS = 8000;
     public static final int RECORD_AUDIO_PERMISSION_CODE = 1;
 
     private static final String TAG = "USB DAC Volume Adjustment";
@@ -31,19 +33,33 @@ public final class UsbController {
     // How long a permission request stays pending before it can be retried.
     private static final long PERMISSION_RETRY_MS = 30000;
 
+    // Minimum time between two volume writes for the same DAC, no matter what.
+    private static final long MIN_WRITE_INTERVAL_MS = 3000;
+
     private static final Map<Integer, Long> pendingPermissionIds = new HashMap<>();
+
+    // All access to the DAC, libusb and the file descriptor goes through this
+    // single thread. Concurrent native calls from the UI and the background
+    // attach activity used to crash the native library.
+    private static final ExecutorService usbExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "usb-worker");
+        t.setDaemon(true);
+        return t;
+    });
+    private static final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     // Automatic volume writes happen exactly once per physical connection. A
     // reset caused by the write re-enumerates the DAC and fires attach events
     // again; without this guard those events would apply -> reset -> apply in
-    // an endless loop (the "blinking" sound / USB toast).
+    // an endless loop ("blinking").
     private static boolean applied = false;
     private static int appliedVendorId = -1;
     private static int appliedProductId = -1;
 
     // Timestamp of the last volume write. Events that arrive while this window
     // is open are caused by our own reset, not by the user.
-    private static long lastVolumeWriteTime = 0;
+    private static volatile long lastVolumeWriteTime = 0;
+    private static long lastVolumeWriteDoneTime = 0;
 
     private static volatile PermissionListener permissionListener;
 
@@ -60,6 +76,24 @@ public final class UsbController {
 
     public static PermissionListener getPermissionListener() {
         return permissionListener;
+    }
+
+    public static void runOnUsbThread(Runnable runnable) {
+        runOnUsbThread(runnable, null);
+    }
+
+    public static void runOnUsbThread(Runnable runnable, Runnable onDone) {
+        usbExecutor.execute(() -> {
+            try {
+                runnable.run();
+            } catch (Throwable t) {
+                Log.e(TAG, "USB worker failed", t);
+            } finally {
+                if (onDone != null) {
+                    mainHandler.post(onDone);
+                }
+            }
+        });
     }
 
     public static SharedPreferences prefs(Context context) {
@@ -201,7 +235,11 @@ public final class UsbController {
                 PendingIntent.getBroadcast(appContext, device.getDeviceId(), intent, flags);
 
         pendingPermissionIds.put(device.getDeviceId(), now);
-        usbManager.requestPermission(device, permissionIntent);
+        try {
+            usbManager.requestPermission(device, permissionIntent);
+        } catch (Throwable t) {
+            Log.e(TAG, "requestPermission failed", t);
+        }
     }
 
     public static synchronized void clearRequested(UsbDevice device) {
@@ -234,23 +272,26 @@ public final class UsbController {
      * Called for every USB attach event. An attach that arrives while our own
      * reset window is open is the re-enumeration caused by the volume write;
      * anything else is a fresh physical connection.
+     *
+     * @return true if this looks like a fresh physical connection
      */
     public static synchronized boolean noteAttach(UsbDevice device) {
         if (device == null) {
             return false;
         }
+        if (isInResetWindow()) {
+            return false;
+        }
         if (applied
                 && device.getVendorId() == appliedVendorId
-                && device.getProductId() == appliedProductId
-                && !isInResetWindow()) {
+                && device.getProductId() == appliedProductId) {
             // Fresh connection after a very quick unplug/replug whose detach
             // event was swallowed by the reset window.
             applied = false;
             appliedVendorId = -1;
             appliedProductId = -1;
-            return true;
         }
-        return false;
+        return true;
     }
 
     /**
@@ -266,6 +307,9 @@ public final class UsbController {
                 && device.getProductId() == appliedProductId) {
             return false;
         }
+        if (System.currentTimeMillis() - lastVolumeWriteDoneTime < MIN_WRITE_INTERVAL_MS) {
+            return false;
+        }
         applied = true;
         appliedVendorId = device.getVendorId();
         appliedProductId = device.getProductId();
@@ -276,14 +320,99 @@ public final class UsbController {
         lastVolumeWriteTime = System.currentTimeMillis();
     }
 
+    public static synchronized void endVolumeWrite() {
+        lastVolumeWriteDoneTime = System.currentTimeMillis();
+        lastVolumeWriteTime = lastVolumeWriteDoneTime;
+    }
+
+    /** Marks the current connection as handled (used by manual Apply). */
+    public static synchronized void markApplied(UsbDevice device) {
+        if (device == null) {
+            return;
+        }
+        applied = true;
+        appliedVendorId = device.getVendorId();
+        appliedProductId = device.getProductId();
+    }
+
     public static synchronized boolean isInResetWindow() {
         return System.currentTimeMillis() - lastVolumeWriteTime < RESET_WINDOW_MS;
     }
 
     /**
-     * Opens the DAC, writes the saved volume and closes it again. Used by the
-     * background components when automatic mode is enabled, so no user
-     * interface has to be shown. The callback runs on the main thread.
+     * Opens the DAC and returns its name. Must be called on the USB worker
+     * thread (see runOnUsbThread).
+     */
+    public static String openDeviceName(Context context, UsbDevice device, int[] outFd) {
+        UsbManager usbManager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
+        if (usbManager == null || device == null || !usbManager.hasPermission(device)) {
+            return null;
+        }
+        UsbDeviceConnection connection = usbManager.openDevice(device);
+        if (connection == null) {
+            Log.e(TAG, "openDevice failed");
+            return null;
+        }
+        int fd = connection.getFileDescriptor();
+        if (fd < 0) {
+            Log.e(TAG, "invalid file descriptor");
+            connection.close();
+            return null;
+        }
+        if (outFd != null && outFd.length > 0) {
+            outFd[0] = fd;
+        }
+        String name = null;
+        try {
+            name = UsbNative.initializeNativeDevice(fd);
+        } catch (Throwable t) {
+            Log.e(TAG, "initializeNativeDevice failed", t);
+        } finally {
+            // The file descriptor is not needed afterwards: every volume write
+            // opens its own connection on the worker thread.
+            connection.close();
+        }
+        return name;
+    }
+
+    /**
+     * Opens the DAC, writes the given volume and closes the connection. Runs
+     * on the USB worker thread and resets the DAC afterwards (which restores
+     * audio playback).
+     */
+    public static boolean writeVolume(Context context, UsbDevice device, String volumeHex) {
+        if (device == null || volumeHex == null || !volumeHex.matches("[0-9A-Fa-f]{4}")) {
+            return false;
+        }
+        UsbManager usbManager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
+        if (usbManager == null || !usbManager.hasPermission(device)) {
+            return false;
+        }
+
+        beginVolumeWrite();
+        UsbDeviceConnection connection = usbManager.openDevice(device);
+        if (connection == null) {
+            Log.e(TAG, "writeVolume: openDevice failed");
+            endVolumeWrite();
+            return false;
+        }
+        try {
+            UsbNative.setDeviceVolume(connection.getFileDescriptor(),
+                    hexStringToByteArray(volumeHex));
+            return true;
+        } catch (Throwable t) {
+            Log.e(TAG, "writeVolume failed", t);
+            return false;
+        } finally {
+            connection.close();
+            endVolumeWrite();
+        }
+    }
+
+    /**
+     * Invisible background apply: writes the saved volume once per physical
+     * connection when automatic mode is enabled. The callback runs on the main
+     * thread.
      */
     public static void silentApply(Context context, UsbDevice device, Runnable onDone) {
         if (device == null || !isSilentMode(context)) {
@@ -293,47 +422,19 @@ public final class UsbController {
             return;
         }
         Context appContext = context.getApplicationContext();
-        new Thread(() -> {
-            try {
-                silentApplyInternal(appContext, device);
-            } finally {
-                if (onDone != null) {
-                    new Handler(Looper.getMainLooper()).post(onDone);
-                }
+        runOnUsbThread(() -> {
+            if (isInResetWindow()) {
+                return;
             }
-        }, "usb-silent-apply").start();
-    }
-
-    private static void silentApplyInternal(Context context, UsbDevice device) {
-        if (!hasPermission(context, device) || isInResetWindow()) {
-            return;
-        }
-        if (!acquireApply(device)) {
-            Log.d(TAG, "silentApply: already applied for this connection");
-            return;
-        }
-
-        UsbManager usbManager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
-        if (usbManager == null) {
-            return;
-        }
-
-        beginVolumeWrite();
-        UsbDeviceConnection connection = usbManager.openDevice(device);
-        if (connection == null) {
-            Log.e(TAG, "silentApply: openDevice failed");
-            return;
-        }
-
-        try {
-            byte[] volume = hexStringToByteArray(getVolumeHex(context));
-            UsbNative.setDeviceVolume(connection.getFileDescriptor(), volume);
-            Log.d(TAG, "silentApply: volume written");
-        } catch (Throwable t) {
-            Log.e(TAG, "silentApply failed", t);
-        } finally {
-            connection.close();
-        }
+            if (!hasPermission(appContext, device)) {
+                return;
+            }
+            if (!acquireApply(device)) {
+                Log.d(TAG, "silentApply: already applied for this connection");
+                return;
+            }
+            writeVolume(appContext, device, getVolumeHex(appContext));
+        }, onDone);
     }
 
     public static byte[] hexStringToByteArray(String s) {
