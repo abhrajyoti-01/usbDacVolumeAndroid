@@ -2,13 +2,14 @@ package com.example.libusbAndroidTest;
 
 import android.app.Activity;
 import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbManager;
 import android.os.Bundle;
 
 /**
  * Invisible entry point for USB device attach events. The system starts this
- * activity when a DAC is plugged in; it applies the saved volume silently and
- * finishes without ever showing a window, so the user interface never opens on
- * connect. The component is only enabled while automatic mode is on.
+ * activity when a headphone/IEM is plugged in; it applies the saved volume
+ * silently and finishes without ever showing a window, so the user interface
+ * never opens on connect.
  */
 public class UsbAttachActivity extends Activity {
 
@@ -31,15 +32,13 @@ public class UsbAttachActivity extends Activity {
         // app sends a crafted intent, the device is validated against the live
         // USB device list below, so a fake UsbDevice cannot be injected.
         if (getIntent() == null
-                || !android.hardware.usb.UsbManager.ACTION_USB_DEVICE_ATTACHED
-                        .equals(getIntent().getAction())) {
+                || !UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(getIntent().getAction())) {
             finish();
             return;
         }
 
-        // A re-attach caused by our own volume reset must not do anything at
-        // all - in particular it must not ask for permission again.
-        if (UsbController.isInResetWindow()) {
+        // Auto handling not wanted: do nothing at all, stay invisible.
+        if (!UsbController.shouldAutoApply(this)) {
             finish();
             return;
         }
@@ -62,22 +61,18 @@ public class UsbAttachActivity extends Activity {
             finish();
             return;
         }
-        if (!UsbController.isSilentMode(this)) {
-            finish();
-            return;
-        }
-
-        UsbController.noteAttach(device);
 
         if (!UsbController.hasPermission(this, device)) {
             // Ask once; the request is deduplicated inside the controller, and
-            // the result is delivered to UsbPermissionReceiver.
+            // the result is delivered to UsbPermissionReceiver which then
+            // applies the volume silently.
             UsbController.requestPermission(this, device);
             finish();
             return;
         }
 
-        // Apply in the background and finish as soon as it is done. The
+        // silentApply ignores re-attach events caused by our own reset and
+        // applies exactly once per physical connection. Finish when done; the
         // activity itself never has a visible window.
         UsbController.silentApply(this, device, this::finish);
     }

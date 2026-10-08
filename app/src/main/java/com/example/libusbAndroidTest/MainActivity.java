@@ -51,7 +51,7 @@ public class MainActivity extends AppCompatActivity {
     private UsbDevice pendingDetached;
 
     private static final String TAG = "USB DAC Volume Adjustment";
-    private static final long VERIFY_DISCONNECT_DELAY_MS = 1000;
+    private static final long VERIFY_DISCONNECT_DELAY_MS = 1500;
 
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
         @Override
@@ -71,30 +71,38 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(action)) {
-            if (UsbController.isInResetWindow()) {
-                // Attach caused by our own volume reset, keep the connection.
+            UsbDevice device = UsbController.getUsbDeviceExtra(intent);
+            if (device == null || !isTargetDevice(device)) {
                 return;
             }
-            UsbDevice device = UsbController.getUsbDeviceExtra(intent);
-            if (device != null) {
-                UsbController.noteAttach(device);
+
+            // Refresh the visible state (also after our own reset, the device
+            // just re-enumerated with a new name).
+            UsbDevice present = UsbController.findPresentDevice(this, device);
+            if (present != null) {
+                connectDevice(present);
             }
-            if (device != null && isTargetDevice(device)) {
-                if (usbManager.hasPermission(device)) {
-                    connectDevice(device);
-                } else {
-                    tv.setText("Waiting for USB permission...");
-                    tv.setBackgroundColor(Color.TRANSPARENT);
-                    UsbController.requestPermission(this, device);
-                }
+
+            if (!usbManager.hasPermission(device)) {
+                tv.setText("Waiting for USB permission...");
+                tv.setBackgroundColor(Color.TRANSPARENT);
+                UsbController.requestPermission(this, device);
+                return;
+            }
+
+            // Apply automatically (deduplicated with the invisible handler, so
+            // the app's own reset cannot cause a blink loop, while a real
+            // unplug/replug always applies again).
+            if (UsbController.shouldAutoApply(this)) {
+                UsbDevice target = present != null ? present : device;
+                UsbController.silentApply(this, target, null);
             }
         } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
-            if (UsbController.isInResetWindow()) {
-                // Detach caused by our own volume reset, keep the connection.
-                return;
-            }
             UsbDevice device = UsbController.getUsbDeviceExtra(intent);
             if (device != null) {
+                // Clear the once-per-connection guard on a real unplug so a
+                // replug applies the volume again automatically.
+                UsbController.noteDetach(this, device);
                 pendingDetached = device;
                 handler.removeCallbacks(verifyDisconnect);
                 handler.postDelayed(verifyDisconnect, VERIFY_DISCONNECT_DELAY_MS);
@@ -113,9 +121,7 @@ public class MainActivity extends AppCompatActivity {
         // within a moment. Verify it is really gone before telling the user.
         UsbDevice present = UsbController.findPresentDevice(this, detached);
         if (present != null) {
-            if (connectedDevice == null || UsbController.isSameDevice(present, connectedDevice)) {
-                connectDevice(present);
-            }
+            connectDevice(present);
             return;
         }
 
@@ -132,6 +138,9 @@ public class MainActivity extends AppCompatActivity {
                 if (granted) {
                     if (device != null) {
                         connectDevice(device);
+                        if (UsbController.shouldAutoApply(this)) {
+                            UsbController.silentApply(this, device, null);
+                        }
                     }
                 } else {
                     tv.setText("USB permission denied");
@@ -155,9 +164,6 @@ public class MainActivity extends AppCompatActivity {
         if (device == null || !usbManager.hasPermission(device)) {
             return;
         }
-        if (connectedDevice != null && UsbController.isSameDevice(device, connectedDevice)) {
-            return;
-        }
 
         final Context appContext = getApplicationContext();
         UsbController.runOnUsbThread(() -> {
@@ -173,17 +179,6 @@ public class MainActivity extends AppCompatActivity {
         connectedDevice = device;
         tv.setText(name != null && !name.isEmpty() ? name : "USB Device");
         tv.setBackgroundColor(Color.TRANSPARENT);
-
-        // Manual "Auto Apply on Start" also works while the UI is open.
-        // Automatic mode is handled by the background component; whoever runs
-        // first wins thanks to the shared per-connection guard.
-        boolean shouldApply = (autoApply.isChecked() || UsbController.isSilentMode(this))
-                && !UsbController.isInResetWindow()
-                && UsbController.acquireApply(device);
-
-        if (shouldApply) {
-            applyVolume(false);
-        }
     }
 
     private void applyVolume(boolean fromUser) {
@@ -192,7 +187,14 @@ public class MainActivity extends AppCompatActivity {
             volInput.setBackgroundColor(Color.RED);
             return;
         }
-        if (connectedDevice == null) {
+
+        // Manual Apply also works when no automatic mode is enabled and when
+        // the connection state was lost (the device is looked up again).
+        UsbDevice device = connectedDevice;
+        if (device == null || !usbManager.hasPermission(device)) {
+            device = findTargetDevice();
+        }
+        if (device == null) {
             if (fromUser) {
                 tv.setText("No USB device connected");
                 tv.setBackgroundColor(Color.RED);
@@ -200,14 +202,13 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        final UsbDevice device = connectedDevice;
+        final UsbDevice target = device;
         final Context appContext = getApplicationContext();
 
-        UsbController.markApplied(device);
         volInput.setBackgroundColor(Color.TRANSPARENT);
 
         UsbController.runOnUsbThread(
-                () -> UsbController.writeVolume(appContext, device, volume),
+                () -> UsbController.writeVolume(appContext, target, volume),
                 () -> {
                     if (fromUser) {
                         Toast.makeText(getApplicationContext(),
@@ -218,6 +219,21 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                 });
+    }
+
+    private UsbDevice findTargetDevice() {
+        if (usbManager == null) {
+            return null;
+        }
+        HashMap<String, UsbDevice> deviceList = usbManager.getDeviceList();
+        UsbDevice single = null;
+        for (UsbDevice device : deviceList.values()) {
+            if (UsbController.isAudioDevice(device)) {
+                return device;
+            }
+            single = device;
+        }
+        return deviceList.size() == 1 ? single : null;
     }
 
     private void checkUsbDevices() {
@@ -233,16 +249,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        UsbDevice target = null;
-        for (UsbDevice device : deviceList.values()) {
-            if (UsbController.isAudioDevice(device)) {
-                target = device;
-                break;
-            }
-        }
-        if (target == null && deviceList.size() == 1) {
-            target = deviceList.values().iterator().next();
-        }
+        UsbDevice target = findTargetDevice();
         if (target == null) {
             tv.setText("No USB audio device detected");
             tv.setBackgroundColor(Color.TRANSPARENT);
@@ -251,7 +258,11 @@ public class MainActivity extends AppCompatActivity {
 
         if (usbManager.hasPermission(target)) {
             UsbDevice present = UsbController.findPresentDevice(this, target);
-            connectDevice(present != null ? present : target);
+            UsbDevice device = present != null ? present : target;
+            connectDevice(device);
+            if (UsbController.shouldAutoApply(this)) {
+                UsbController.silentApply(this, device, null);
+            }
         } else {
             tv.setText("Waiting for USB permission...");
             tv.setBackgroundColor(Color.TRANSPARENT);
@@ -274,7 +285,8 @@ public class MainActivity extends AppCompatActivity {
         volInput.setText(UsbController.getVolumeHex(this));
         autoApply.setChecked(settings.getBoolean("autoApply", false));
         automatic.setChecked(UsbController.isAutomatic(this));
-        UsbController.syncAutomaticComponent(this);
+        UsbController.ensureState(this);
+        UsbController.syncAttachComponent(this);
 
         usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
 
@@ -389,6 +401,9 @@ public class MainActivity extends AppCompatActivity {
             UsbController.prefs(this).edit()
                     .putBoolean("autoApply", autoApply.isChecked())
                     .apply();
+            // Keep the invisible attach handler enabled while any automatic
+            // handling is wanted.
+            UsbController.syncAttachComponent(this);
         } catch (Throwable t) {
             Log.e(TAG, "checkbox failed", t);
         }
@@ -402,9 +417,31 @@ public class MainActivity extends AppCompatActivity {
                 // Ask for permission now so the "always use" option can be chosen;
                 // from then on everything happens invisible in the background.
                 checkUsbDevices();
+                requestIgnoreBatteryOptimizations();
             }
         } catch (Throwable t) {
             Log.e(TAG, "automatic checkbox failed", t);
+        }
+    }
+
+    /**
+     * Asks the user to exempt the app from battery optimization. Without this
+     * Samsung's aggressive power management can kill the process and skip the
+     * automatic volume apply.
+     */
+    private void requestIgnoreBatteryOptimizations() {
+        try {
+            android.os.PowerManager powerManager =
+                    (android.os.PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (powerManager == null || powerManager.isIgnoringBatteryOptimizations(getPackageName())) {
+                return;
+            }
+            Intent intent = new Intent(
+                    android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            intent.setData(android.net.Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        } catch (Throwable t) {
+            Log.w(TAG, "battery optimization request failed", t);
         }
     }
 }

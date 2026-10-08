@@ -6,6 +6,7 @@
 }
 
 # Components declared in AndroidManifest.xml.
+-keep class com.example.libusbAndroidTest.UsbDacApp { *; }
 -keep class com.example.libusbAndroidTest.MainActivity { *; }
 -keep class com.example.libusbAndroidTest.UsbAttachActivity { *; }
 -keep class com.example.libusbAndroidTest.UsbPermissionReceiver { *; }

@@ -4,11 +4,16 @@
     <!-- Avoids the audio capture warning in the USB permission dialog. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Lets the user exempt the app from battery optimization so the system
+         does not kill it (which would skip automatic volume apply). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <uses-feature
         android:name="android.hardware.usb.host"
         android:required="true" />
 
     <application
+        android:name=".UsbDacApp"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="false"

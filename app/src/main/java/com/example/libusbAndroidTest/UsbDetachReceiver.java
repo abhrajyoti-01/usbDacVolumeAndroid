@@ -7,11 +7,11 @@ import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 
 /**
- * Tracks physical unplug events. USB_DEVICE_DETACHED is a protected system
- * broadcast, so this receiver cannot be spoofed by other apps. Its only job is
- * to clear the apply cooldown after a real unplug so a replug applies the
- * volume immediately (a detach caused by the app's own volume reset is
- * ignored).
+ * Keeps the app state tidy on unplug. USB_DEVICE_DETACHED is a protected system
+ * broadcast, so this receiver cannot be spoofed by other apps. The next attach
+ * event always re-applies the volume (see UsbController.claimAttachApply), so
+ * nothing special has to be done here besides clearing the pending
+ * permission marker.
  */
 public class UsbDetachReceiver extends BroadcastReceiver {
 
@@ -27,7 +27,7 @@ public class UsbDetachReceiver extends BroadcastReceiver {
                 return;
             }
             UsbController.clearRequested(device);
-            UsbController.onDetach(device);
+            UsbController.noteDetach(context, device);
         } catch (Throwable t) {
             android.util.Log.e("USB DAC Volume Adjustment", "detach handling failed", t);
         }
