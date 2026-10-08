@@ -7,8 +7,9 @@
 
 static bool g_libusbInitialized = false;
 
-// All native USB operations are serialized. Concurrent access to the same
-// file descriptor / libusb state causes native crashes.
+// Serializes all native USB operations. The UI and the invisible background
+// handler could otherwise access the same file descriptor concurrently, which
+// crashes inside libusb.
 static std::mutex g_usbMutex;
 
 static int ensureLibusbInitialized() {

@@ -33,7 +33,7 @@ static void print_endpoint(const struct libusb_endpoint_descriptor *endpoint)
 
     /* The extra bytes come from the (untrusted) USB device and may be
      * malformed. Each descriptor must be at least 2 bytes long; a zero
-     * length would loop forever, and reading [i + 1] out of bounds must be
+     * length would loop forever. Reading [i + 1] out of bounds must be
      * prevented as well. */
     i = 0;
     while (i + 1 < endpoint->extra_length) {
@@ -109,16 +109,13 @@ static void print_bos(libusb_device_handle *handle)
 
     for (i = 0; i < bos->bNumDeviceCaps; i++) {
         struct libusb_bos_dev_capability_descriptor *dev_cap = bos->dev_capability[i];
-        if (dev_cap == nullptr) {
-            continue;
-        }
 
         if (dev_cap->bDevCapabilityType == LIBUSB_BT_USB_2_0_EXTENSION) {
             struct libusb_usb_2_0_extension_descriptor *usb_2_0_extension;
 
             ret = libusb_get_usb_2_0_extension_descriptor(nullptr, dev_cap, &usb_2_0_extension);
             if (ret < 0)
-                continue;
+                return;
 
             print_2_0_ext_cap(usb_2_0_extension);
             libusb_free_usb_2_0_extension_descriptor(usb_2_0_extension);
@@ -127,7 +124,7 @@ static void print_bos(libusb_device_handle *handle)
 
             ret = libusb_get_ss_usb_device_capability_descriptor(nullptr, dev_cap, &ss_dev_cap);
             if (ret < 0)
-                continue;
+                return;
 
             print_ss_usb_cap(ss_dev_cap);
             libusb_free_ss_usb_device_capability_descriptor(ss_dev_cap);

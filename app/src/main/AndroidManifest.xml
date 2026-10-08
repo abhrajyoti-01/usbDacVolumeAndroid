@@ -4,19 +4,12 @@
     <!-- Avoids the audio capture warning in the USB permission dialog. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- Lets the user exempt the app from battery optimization so the system
-         does not kill it (which would skip automatic volume apply). -->
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-
     <uses-feature
         android:name="android.hardware.usb.host"
         android:required="true" />
 
     <application
-        android:name=".UsbDacApp"
-        android:allowBackup="false"
-        android:dataExtractionRules="@xml/data_extraction_rules"
-        android:fullBackupContent="false"
+        android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -49,12 +42,6 @@
             android:noHistory="true"
             android:theme="@style/Theme.USBTransparent"
             android:taskAffinity="">
-            <!--
-                The system starts this activity for USB_DEVICE_ATTACHED, so it
-                must be exported. Spoofed intents from other apps are harmless:
-                the handler validates the device against the live USB device
-                list and requires the system-granted USB permission.
-            -->
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
             </intent-filter>

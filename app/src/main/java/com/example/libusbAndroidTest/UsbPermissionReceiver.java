@@ -20,14 +20,6 @@ public class UsbPermissionReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        try {
-            handleReceive(context, intent);
-        } catch (Throwable t) {
-            Log.e(TAG, "permission result handling failed", t);
-        }
-    }
-
-    private void handleReceive(Context context, Intent intent) {
         if (intent == null
                 || !UsbController.ACTION_USB_PERMISSION.equals(intent.getAction())) {
             return;

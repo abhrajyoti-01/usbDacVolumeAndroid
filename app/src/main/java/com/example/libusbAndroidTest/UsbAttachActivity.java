@@ -2,16 +2,19 @@ package com.example.libusbAndroidTest;
 
 import android.app.Activity;
 import android.hardware.usb.UsbDevice;
-import android.hardware.usb.UsbManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 
 /**
  * Invisible entry point for USB device attach events. The system starts this
- * activity when a headphone/IEM is plugged in; it applies the saved volume
- * silently and finishes without ever showing a window, so the user interface
- * never opens on connect.
+ * activity when a DAC is plugged in; it applies the saved volume silently and
+ * finishes without ever showing a window, so the user interface never opens on
+ * connect. The component is only enabled while automatic handling is wanted.
  */
 public class UsbAttachActivity extends Activity {
+
+    private final Handler handler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -28,52 +31,52 @@ public class UsbAttachActivity extends Activity {
     }
 
     private void handleIntent() {
-        // Only the system may start us for a USB attach event. Even if another
-        // app sends a crafted intent, the device is validated against the live
-        // USB device list below, so a fake UsbDevice cannot be injected.
-        if (getIntent() == null
-                || !UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(getIntent().getAction())) {
-            finish();
-            return;
-        }
-
-        // Auto handling not wanted: do nothing at all, stay invisible.
-        if (!UsbController.shouldAutoApply(this)) {
-            finish();
-            return;
-        }
-
-        UsbDevice claimed = UsbController.getUsbDeviceExtra(getIntent());
-        if (claimed == null) {
-            finish();
-            return;
-        }
-
-        // Trust only devices that are really attached right now.
-        UsbDevice device = UsbController.findPresentDevice(this, claimed);
+        UsbDevice device = UsbController.getUsbDeviceExtra(getIntent());
         if (device == null) {
             finish();
             return;
         }
 
+        // Only audio devices (or a single attached device) are interesting.
+        // Everything else is ignored invisibly.
         if (!UsbController.isAudioDevice(device)
                 && !UsbController.isSingleAttachedDevice(this, device)) {
             finish();
             return;
         }
 
-        if (!UsbController.hasPermission(this, device)) {
-            // Ask once; the request is deduplicated inside the controller, and
-            // the result is delivered to UsbPermissionReceiver which then
-            // applies the volume silently.
-            UsbController.requestPermission(this, device);
+        if (!UsbController.shouldAutoApply(this)) {
             finish();
             return;
         }
 
-        // silentApply ignores re-attach events caused by our own reset and
-        // applies exactly once per physical connection. Finish when done; the
+        if (!UsbController.hasPermission(this, device)) {
+            // Only the invisible mode asks for the permission dialog; with
+            // "Auto Apply on Start" the volume is applied when permission was
+            // already granted earlier, without any popup.
+            if (UsbController.isAutomatic(this)) {
+                UsbController.requestPermission(this, device);
+            }
+            finish();
+            return;
+        }
+
+        UsbController.noteAttach(device);
+
+        if (UsbController.isInResetWindow()) {
+            // Re-attach caused by our own volume write, nothing to do.
+            finish();
+            return;
+        }
+
+        // Apply in the background and finish as soon as it is done. The
         // activity itself never has a visible window.
         UsbController.silentApply(this, device, this::finish);
+    }
+
+    @Override
+    protected void onDestroy() {
+        handler.removeCallbacksAndMessages(null);
+        super.onDestroy();
     }
 }

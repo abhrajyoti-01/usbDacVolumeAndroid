@@ -11,8 +11,8 @@ android {
         applicationId 'com.example.libusbAndroidTest'
         minSdk 28
         targetSdk 36
-        versionCode 8
-        versionName "1.6"
+        versionCode 9
+        versionName "1.7"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         externalNativeBuild {
@@ -26,20 +26,10 @@ android {
     buildTypes {
         release {
             // Signed with the debug key so the distributed APK is installable
-            // directly (and, unlike a debug build, not debuggable/backupable).
+            // directly (and, unlike a debug build, not debuggable).
             signingConfig signingConfigs.debug
-            minifyEnabled true
-            shrinkResources true
+            minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-        }
-    }
-    buildFeatures {
-        viewBinding true
-        buildConfig false
-    }
-    packagingOptions {
-        jniLibs {
-            useLegacyPackaging = false
         }
     }
     compileOptions {
@@ -50,6 +40,9 @@ android {
         cmake {
             path file('src/main/cpp/CMakeLists.txt')
         }
+    }
+    buildFeatures {
+        viewBinding true
     }
     namespace 'com.example.libusbAndroidTest'
 }
