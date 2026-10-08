@@ -2,7 +2,7 @@
 
 Simple application to set the USB DAC volume on UNROOTED Android Devices
 
-[DOWNLOAD](https://github.com/abhrajyoti-01/usbDacVolumeAndroid/releases/download/release-1.4/app-debug.apk)
+[DOWNLOAD](https://github.com/abhrajyoti-01/usbDacVolumeAndroid/releases/download/release-1.5/app-release.apk)
 
 > **This fork** fixes Samsung Galaxy S24 Ultra / Android 15-16 (One UI 7/8) compatibility, including the permission/relaunch crash loop and the "no sound after Apply" problem (the kernel `snd-usb-audio` driver is now re-attached by resetting the DAC after the volume is set).
 
@@ -29,6 +29,17 @@ The vast majority of high end android smartphones sold today do not contain a 3.
  - The app clears its own cache automatically on every launch.
  - The permission dialog is not shown again after the app's own USB reset.
 
+# Security hardening
+ - **Malformed USB descriptors** can no longer hang or crash the app (bounds-checked descriptor walking in the native helper).
+ - **No component accepts untrusted input**: the invisible attach handler validates the device against the live USB device list and the system-granted USB permission, so a crafted intent from another app cannot trigger any USB operation.
+ - **Backups disabled** (`allowBackup=false`), so app data cannot be extracted via `adb backup`.
+ - **Supply chain locked**:
+   - `gradle/verification-metadata.xml` pins SHA-256 checksums of every dependency; the build fails if any artifact changes.
+   - The Gradle wrapper script and JAR are the official Gradle 8.11.1 releases (verified by hash) and the wrapper distribution is pinned with `distributionSha256Sum`.
+   - The `libusb` submodule is pinned to a specific upstream commit of `libusb/libusb`.
+   - Release builds are minified/obfuscated with R8 and are not debuggable.
+ - **No permissions** are declared except `RECORD_AUDIO` (used only to suppress the USB audio-capture warning) and USB host. The app never accesses the network, storage, contacts, location or any other data.
+
 # Automatic (invisible) mode
 Tick **Automatic (invisible)** in the app and keep **"Always use for this device"** checked on the one-time USB permission popup. From then on:
  - The app never opens a window when a DAC is connected - the volume is applied silently in the background.
@@ -54,9 +65,9 @@ You will temporarily lose sound during the setting of volume, however you should
 # Building
 ```
 git submodule update --init --recursive
-./gradlew assembleDebug
+./gradlew assembleRelease
 ```
-The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
+The APK is written to `app/build/outputs/apk/release/app-release.apk` (or `app/build/outputs/apk/debug/app-debug.apk` for `assembleDebug`).
 Requires JDK 17+, Android SDK with API 36 platform, NDK 27.1 and CMake.
 
 # Special thanks to:

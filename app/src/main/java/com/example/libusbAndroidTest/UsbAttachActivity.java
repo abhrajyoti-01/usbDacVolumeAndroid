@@ -27,6 +27,16 @@ public class UsbAttachActivity extends Activity {
     }
 
     private void handleIntent() {
+        // Only the system may start us for a USB attach event. Even if another
+        // app sends a crafted intent, the device is validated against the live
+        // USB device list below, so a fake UsbDevice cannot be injected.
+        if (getIntent() == null
+                || !android.hardware.usb.UsbManager.ACTION_USB_DEVICE_ATTACHED
+                        .equals(getIntent().getAction())) {
+            finish();
+            return;
+        }
+
         // A re-attach caused by our own volume reset must not do anything at
         // all - in particular it must not ask for permission again.
         if (UsbController.isInResetWindow()) {
@@ -34,11 +44,19 @@ public class UsbAttachActivity extends Activity {
             return;
         }
 
-        UsbDevice device = UsbController.getUsbDeviceExtra(getIntent());
+        UsbDevice claimed = UsbController.getUsbDeviceExtra(getIntent());
+        if (claimed == null) {
+            finish();
+            return;
+        }
+
+        // Trust only devices that are really attached right now.
+        UsbDevice device = UsbController.findPresentDevice(this, claimed);
         if (device == null) {
             finish();
             return;
         }
+
         if (!UsbController.isAudioDevice(device)
                 && !UsbController.isSingleAttachedDevice(this, device)) {
             finish();

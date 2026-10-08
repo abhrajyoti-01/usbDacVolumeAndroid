@@ -1,21 +1,24 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# Keep the JNI bridge: the native library is bound by the fully qualified
+# class/method names (Java_com_example_libusbAndroidTest_UsbNative_*), so
+# renaming or stripping these would break it and must never happen.
+-keep class com.example.libusbAndroidTest.UsbNative {
+    native <methods>;
+}
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Components declared in AndroidManifest.xml.
+-keep class com.example.libusbAndroidTest.MainActivity { *; }
+-keep class com.example.libusbAndroidTest.UsbAttachActivity { *; }
+-keep class com.example.libusbAndroidTest.UsbPermissionReceiver { *; }
+-keep class com.example.libusbAndroidTest.UsbDetachReceiver { *; }
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Keep methods referenced from layout XML (android:onClick).
+-keepclassmembers class com.example.libusbAndroidTest.MainActivity {
+    public void applyButtonPressed(android.view.View);
+    public void checkboxPressed(android.view.View);
+    public void automaticCheckboxPressed(android.view.View);
+}
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Keep annotations and line numbers for meaningful crash reports.
+-keepattributes *Annotation*
+-renamesourcefileattribute SourceFile
+-keepattributes SourceFile,LineNumberTable
