@@ -4,6 +4,10 @@
     <!-- Avoids the audio capture warning in the USB permission dialog. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Re-applies the saved volume after a reboot, when the DAC is already
+         attached and no USB_DEVICE_ATTACHED broadcast is sent. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <uses-feature
         android:name="android.hardware.usb.host"
         android:required="true" />
@@ -62,6 +66,21 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_DEVICE_DETACHED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Re-applies the volume after a reboot. The DAC is already attached
+             at boot, so no USB_DEVICE_ATTACHED event is delivered and the
+             invisible attach handler never runs on its own. -->
+        <receiver
+            android:name="com.example.libusbAndroidTest.UsbBootReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
     </application>
