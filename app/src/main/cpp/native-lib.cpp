@@ -62,16 +62,16 @@ std::string connect_device(int fileDescriptor) {
     return deviceName;
 }
 
-void setVolume(int fileDescriptor, unsigned char *data, int length) {
+bool setVolume(int fileDescriptor, unsigned char *data, int length) {
     if (ensureLibusbInitialized() < 0) {
-        return;
+        return false;
     }
 
     libusb_device_handle *devh = nullptr;
     int r = libusb_wrap_sys_device(nullptr, (intptr_t) fileDescriptor, &devh);
     if (r < 0 || devh == nullptr) {
         log("setVolume: libusb_wrap_sys_device failed: %s", libusb_strerror(r));
-        return;
+        return false;
     }
 
     // Detach the kernel audio driver (snd-usb-audio) so the interface can be
@@ -90,11 +90,13 @@ void setVolume(int fileDescriptor, unsigned char *data, int length) {
     // wValue = (control selector << 8) | channel.
     // Selector 2 is volume, channels 1 and 2 are left/right.
     r = libusb_control_transfer(devh, 0x21, 0x01, 0x0201, 0x0200, data, (uint16_t) length, 500);
+    bool volumeWritten = r == length;
     if (r < 0) {
         log("setVolume: control transfer (channel 1) failed: %s", libusb_strerror(r));
     }
 
     r = libusb_control_transfer(devh, 0x21, 0x01, 0x0202, 0x0200, data, (uint16_t) length, 500);
+    volumeWritten = volumeWritten && r == length;
     if (r < 0) {
         log("setVolume: control transfer (channel 2) failed: %s", libusb_strerror(r));
     }
@@ -110,6 +112,7 @@ void setVolume(int fileDescriptor, unsigned char *data, int length) {
     }
 
     libusb_close(devh);
+    return volumeWritten;
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -126,7 +129,7 @@ Java_com_example_libusbAndroidTest_UsbNative_initializeNativeDevice(
 }
 
 
-extern "C" JNIEXPORT void JNICALL
+extern "C" JNIEXPORT jboolean JNICALL
 Java_com_example_libusbAndroidTest_UsbNative_setDeviceVolume(
         JNIEnv *env,
         jclass /* clazz */,
@@ -137,11 +140,11 @@ Java_com_example_libusbAndroidTest_UsbNative_setDeviceVolume(
 
     jsize length = env->GetArrayLength(volume);
     if (length <= 0 || length > 8) {
-        return;
+        return JNI_FALSE;
     }
 
     unsigned char data[8];
     env->GetByteArrayRegion(volume, 0, length, reinterpret_cast<jbyte*>(data));
 
-    setVolume(fileDescriptor, data, (int) length);
+    return setVolume(fileDescriptor, data, (int) length) ? JNI_TRUE : JNI_FALSE;
 }

@@ -13,6 +13,8 @@ import android.hardware.usb.UsbManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
+import android.provider.Settings;
 import android.util.Log;
 
 import java.util.HashMap;
@@ -40,10 +42,6 @@ public final class UsbController {
     private static boolean applied = false;
     private static int appliedVendorId = -1;
     private static int appliedProductId = -1;
-
-    // Timestamp of the last volume write. Events that arrive while this window
-    // is open are caused by our own reset, not by the user.
-    private static long lastVolumeWriteTime = 0;
 
     private static volatile PermissionListener permissionListener;
 
@@ -121,6 +119,15 @@ public final class UsbController {
     public static String getVolumeHex(Context context) {
         String volume = prefs(context).getString("volume", "0000");
         return (volume != null && volume.matches("[0-9A-Fa-f]{4}")) ? volume : "0000";
+    }
+
+    /** A successful manual Apply also opts into restoring the saved setting. */
+    public static void rememberVolume(Context context, String volume) {
+        prefs(context).edit()
+                .putString("volume", volume)
+                .putBoolean("automatic", true)
+                .apply();
+        syncAutomaticComponent(context);
     }
 
     public static UsbDevice getUsbDeviceExtra(Intent intent) {
@@ -229,11 +236,11 @@ public final class UsbController {
      * "already applied" state; a detach caused by our own volume write is
      * ignored so it cannot lead to repeated applies (blinking).
      */
-    public static synchronized void onDetach(UsbDevice device) {
+    public static synchronized void onDetach(Context context, UsbDevice device) {
         if (device == null) {
             return;
         }
-        if (isInResetWindow()) {
+        if (isInResetWindow(context)) {
             Log.d(TAG, "detach during reset window ignored");
             return;
         }
@@ -267,14 +274,14 @@ public final class UsbController {
      * reset window is open is the re-enumeration caused by the volume write;
      * anything else is a fresh physical connection.
      */
-    public static synchronized boolean noteAttach(UsbDevice device) {
+    public static synchronized boolean noteAttach(Context context, UsbDevice device) {
         if (device == null) {
             return false;
         }
         if (applied
                 && device.getVendorId() == appliedVendorId
                 && device.getProductId() == appliedProductId
-                && !isInResetWindow()) {
+                && !isInResetWindow(context)) {
             // Fresh connection after a very quick unplug/replug whose detach
             // event was swallowed by the reset window.
             applied = false;
@@ -304,12 +311,25 @@ public final class UsbController {
         return true;
     }
 
-    public static synchronized void beginVolumeWrite() {
-        lastVolumeWriteTime = System.currentTimeMillis();
+    public static synchronized void beginVolumeWrite(Context context) {
+        // Persist before the USB reset: Android may recreate our process when
+        // the device enumerates again. Elapsed time plus boot count also keeps
+        // a clock change or a phone reboot from creating a false cooldown.
+        prefs(context).edit()
+                .putLong("lastVolumeWrite", SystemClock.elapsedRealtime())
+                .putInt("lastVolumeWriteBoot", bootCount(context))
+                .commit();
     }
 
-    public static synchronized boolean isInResetWindow() {
-        return System.currentTimeMillis() - lastVolumeWriteTime < RESET_WINDOW_MS;
+    private static int bootCount(Context context) {
+        return Settings.Global.getInt(context.getContentResolver(), Settings.Global.BOOT_COUNT, -1);
+    }
+
+    public static synchronized boolean isInResetWindow(Context context) {
+        SharedPreferences settings = prefs(context);
+        return ResetWindow.isActive(settings.getLong("lastVolumeWrite", -1),
+                settings.getInt("lastVolumeWriteBoot", -1),
+                SystemClock.elapsedRealtime(), bootCount(context), RESET_WINDOW_MS);
     }
 
     /**
@@ -337,7 +357,7 @@ public final class UsbController {
     }
 
     private static void silentApplyInternal(Context context, UsbDevice device) {
-        if (!hasPermission(context, device) || isInResetWindow()) {
+        if (!hasPermission(context, device) || isInResetWindow(context)) {
             return;
         }
         if (!acquireApply(device)) {
@@ -347,24 +367,33 @@ public final class UsbController {
 
         UsbManager usbManager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
         if (usbManager == null) {
+            forgetDevice(device);
             return;
         }
 
-        beginVolumeWrite();
-        UsbDeviceConnection connection = usbManager.openDevice(device);
-        if (connection == null) {
-            Log.e(TAG, "silentApply: openDevice failed");
-            return;
-        }
-
+        UsbDeviceConnection connection = null;
         try {
+            connection = usbManager.openDevice(device);
+            if (connection == null || connection.getFileDescriptor() < 0) {
+                forgetDevice(device);
+                Log.e(TAG, "silentApply: openDevice failed");
+                return;
+            }
             byte[] volume = hexStringToByteArray(getVolumeHex(context));
-            UsbNative.setDeviceVolume(connection.getFileDescriptor(), volume);
+            beginVolumeWrite(context);
+            if (!UsbNative.setDeviceVolume(connection.getFileDescriptor(), volume)) {
+                forgetDevice(device);
+                Log.e(TAG, "silentApply: volume transfer failed");
+                return;
+            }
             Log.d(TAG, "silentApply: volume written");
         } catch (Throwable t) {
+            forgetDevice(device);
             Log.e(TAG, "silentApply failed", t);
         } finally {
-            connection.close();
+            if (connection != null) {
+                connection.close();
+            }
         }
     }
 

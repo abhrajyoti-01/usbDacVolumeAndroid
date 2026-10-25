@@ -11,5 +11,5 @@ public final class UsbNative {
 
     public static native String initializeNativeDevice(int fileDescriptor);
 
-    public static native void setDeviceVolume(int fileDescriptor, byte[] volume);
+    public static native boolean setDeviceVolume(int fileDescriptor, byte[] volume);
 }

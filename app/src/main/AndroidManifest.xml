@@ -35,8 +35,8 @@
             it when a DAC is plugged in; it never shows a window and finishes
             immediately. It also makes the app eligible for the "always use"
             USB permission checkbox. The component is disabled by default and
-            only enabled while automatic mode is selected, so with automatic
-            mode off plugging a DAC launches nothing at all.
+            enabled after a successful Apply or while either automatic option
+            is selected. With both options off, a replug launches nothing.
         -->
         <activity
             android:name="com.example.libusbAndroidTest.UsbAttachActivity"

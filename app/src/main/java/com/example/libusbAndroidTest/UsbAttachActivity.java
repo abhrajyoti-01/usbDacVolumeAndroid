@@ -1,10 +1,9 @@
 package com.example.libusbAndroidTest;
 
 import android.app.Activity;
+import android.hardware.usb.UsbManager;
 import android.hardware.usb.UsbDevice;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 
 /**
  * Invisible entry point for USB device attach events. The system starts this
@@ -13,8 +12,6 @@ import android.os.Looper;
  * connect. The component is only enabled while automatic handling is wanted.
  */
 public class UsbAttachActivity extends Activity {
-
-    private final Handler handler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -31,7 +28,13 @@ public class UsbAttachActivity extends Activity {
     }
 
     private void handleIntent() {
+        if (!UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(getIntent().getAction())) {
+            finish();
+            return;
+        }
         UsbDevice device = UsbController.getUsbDeviceExtra(getIntent());
+        // Use only the current system device, never a stale or supplied handle.
+        device = UsbController.findPresentDevice(this, device);
         if (device == null) {
             finish();
             return;
@@ -61,9 +64,9 @@ public class UsbAttachActivity extends Activity {
             return;
         }
 
-        UsbController.noteAttach(device);
+        UsbController.noteAttach(this, device);
 
-        if (UsbController.isInResetWindow()) {
+        if (UsbController.isInResetWindow(this)) {
             // Re-attach caused by our own volume write, nothing to do.
             finish();
             return;
@@ -74,9 +77,4 @@ public class UsbAttachActivity extends Activity {
         UsbController.silentApply(this, device, this::finish);
     }
 
-    @Override
-    protected void onDestroy() {
-        handler.removeCallbacksAndMessages(null);
-        super.onDestroy();
-    }
 }

@@ -48,7 +48,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="17dp"
         android:onClick="checkboxPressed"
-        android:text="Auto Apply on Start"
+        android:text="Auto Apply on Connect"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/volume" />
@@ -69,7 +69,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
-        android:text="When enabled, the app never opens a window. Keep &quot;Always use&quot; checked on the USB permission popup so it keeps working invisibly."
+        android:text="Apply saves your volume and enables automatic restore on reconnect, even when this app is closed. Choose &quot;Always use&quot; in Android's USB dialog. Settings survive a restart; clearing app data or a factory reset removes them."
         android:textSize="12sp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"

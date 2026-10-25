@@ -43,7 +43,8 @@ public class UsbPermissionReceiver extends BroadcastReceiver {
                     .post(() -> listener.onPermissionResult(device, granted));
         } else if (granted) {
             // App UI is not open: apply silently in the background.
-            UsbController.silentApply(appContext, device, null);
+            PendingResult pendingResult = goAsync();
+            UsbController.silentApply(appContext, device, pendingResult::finish);
         }
     }
 }

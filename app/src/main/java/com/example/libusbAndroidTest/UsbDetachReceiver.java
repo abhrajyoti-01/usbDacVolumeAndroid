@@ -5,6 +5,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
+import android.os.Handler;
+import android.os.Looper;
 
 /**
  * Tracks physical unplug events. USB_DEVICE_DETACHED is a protected system
@@ -25,6 +27,20 @@ public class UsbDetachReceiver extends BroadcastReceiver {
             return;
         }
         UsbController.clearRequested(device);
-        UsbController.onDetach(device);
+        UsbController.onDetach(context, device);
+
+        // A real unplug can occur during the reset cooldown. Check again once
+        // re-enumeration has settled, even when no settings activity is open.
+        PendingResult pendingResult = goAsync();
+        Context appContext = context.getApplicationContext();
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            try {
+                if (UsbController.findPresentDevice(appContext, device) == null) {
+                    UsbController.forgetDevice(device);
+                }
+            } finally {
+                pendingResult.finish();
+            }
+        }, UsbController.RESET_WINDOW_MS + 600);
     }
 }

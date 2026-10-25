@@ -65,13 +65,13 @@ public class MainActivity extends AppCompatActivity {
             }
 
             if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(action)) {
-                if (UsbController.isInResetWindow()) {
+                if (UsbController.isInResetWindow(context)) {
                     // Attach caused by our own volume reset, keep the connection.
                     return;
                 }
                 UsbDevice device = UsbController.getUsbDeviceExtra(intent);
                 if (device != null) {
-                    UsbController.noteAttach(device);
+                    UsbController.noteAttach(context, device);
                 }
                 if (device != null && isTargetDevice(device)) {
                     if (usbManager.hasPermission(device)) {
@@ -83,7 +83,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
             } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
-                if (UsbController.isInResetWindow()) {
+                if (UsbController.isInResetWindow(context)) {
                     // Detach caused by our own volume reset, keep the connection.
                     return;
                 }
@@ -236,7 +236,8 @@ public class MainActivity extends AppCompatActivity {
         // When automatic mode is on the background component normally performs
         // the apply; whoever runs first wins thanks to the shared guard.
         boolean shouldApply = UsbController.shouldAutoApply(this)
-                && !UsbController.isInResetWindow()
+                && !afterReset
+                && !UsbController.isInResetWindow(this)
                 && UsbController.acquireApply(device);
 
         if (shouldApply) {
@@ -253,7 +254,8 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        String volume = volInput.getText().toString();
+        String volume = fromUser
+                ? volInput.getText().toString() : UsbController.getVolumeHex(this);
         if (!volume.matches("[0-9A-Fa-f]{4}")) {
             volInput.setBackgroundColor(Color.RED);
             return;
@@ -261,17 +263,24 @@ public class MainActivity extends AppCompatActivity {
 
         // The native call resets the USB device, so everything that happens in
         // the next seconds is part of this write, not a real disconnect.
-        UsbController.beginVolumeWrite();
+        UsbController.beginVolumeWrite(this);
         if (connectedDevice != null) {
             UsbController.acquireApply(connectedDevice);
         }
 
         try {
-            UsbNative.setDeviceVolume(deviceDescriptor, UsbController.hexStringToByteArray(volume));
+            if (!UsbNative.setDeviceVolume(deviceDescriptor,
+                    UsbController.hexStringToByteArray(volume))) {
+                UsbController.forgetDevice(connectedDevice);
+                volInput.setBackgroundColor(Color.RED);
+                scheduleReconnectAfterReset();
+                return;
+            }
             volInput.setBackgroundColor(Color.TRANSPARENT);
             scheduleReconnectAfterReset();
         } catch (Throwable t) {
             Log.e(TAG, "applyVolume failed", t);
+            UsbController.forgetDevice(connectedDevice);
             volInput.setBackgroundColor(Color.RED);
             return;
         }
@@ -280,12 +289,10 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        Toast.makeText(getApplicationContext(), "Volume set for DAC!", Toast.LENGTH_SHORT).show();
-
-        SharedPreferences settings = UsbController.prefs(this);
-        if (!settings.getString("volume", "").equals(volume)) {
-            settings.edit().putString("volume", volume).apply();
-        }
+        UsbController.rememberVolume(this, volume);
+        automatic.setChecked(true);
+        Toast.makeText(getApplicationContext(),
+                "Saved! Volume will restore when you reconnect.", Toast.LENGTH_LONG).show();
     }
 
     private void checkUsbDevices()
@@ -351,7 +358,6 @@ public class MainActivity extends AppCompatActivity {
         UsbController.setPermissionListener(permissionListener);
 
         requestRecordAudioPermission();
-        checkUsbDevices();
     }
 
     @Override
@@ -372,6 +378,8 @@ public class MainActivity extends AppCompatActivity {
             ActivityCompat.requestPermissions(this,
                     new String[]{Manifest.permission.RECORD_AUDIO},
                     UsbController.RECORD_AUDIO_PERMISSION_CODE);
+        } else {
+            checkUsbDevices();
         }
     }
 
@@ -384,6 +392,9 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 Log.d(TAG, "RECORD_AUDIO permission denied");
             }
+            // Request USB access only after the microphone decision, so Android
+            // can offer persistent access for headsets with a capture interface.
+            checkUsbDevices();
         }
     }
 
