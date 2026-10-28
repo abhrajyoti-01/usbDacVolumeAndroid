@@ -30,6 +30,17 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/automatic_hint" />
 
+    <TextView
+        android:id="@+id/auto_status"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:gravity="center_horizontal"
+        android:textSize="12sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/mount_btn" />
+
     <EditText
         android:id="@+id/volume"
         android:layout_width="wrap_content"
@@ -69,7 +80,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
-        android:text="Apply saves your volume and enables automatic restore on reconnect, even when this app is closed. Choose &quot;Always use&quot; in Android's USB dialog. Settings survive a restart; clearing app data or a factory reset removes them."
+        android:text="Apply saves your volume. When Android asks about USB access, tick &quot;Always open USB DAC Volume&quot; once: from then on the volume is restored invisibly on every connect, without opening this app, also after a restart. Only a factory reset, uninstalling or clearing app data removes it."
         android:textSize="12sp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"

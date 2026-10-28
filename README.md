@@ -2,7 +2,7 @@
 
 Simple application to set the USB DAC volume on UNROOTED Android Devices
 
-[DOWNLOAD](https://github.com/abhrajyoti-01/usbDacVolumeAndroid/releases/download/release-1.8/app-release.apk)
+[DOWNLOAD](https://github.com/abhrajyoti-01/usbDacVolumeAndroid/releases/download/release-1.9/app-release.apk)
 
 > **This fork** fixes Samsung Galaxy S24 Ultra / Android 15-16 (One UI 7/8) compatibility, including the permission/relaunch crash loop and the "no sound after Apply" problem (the kernel `snd-usb-audio` driver is now re-attached by resetting the DAC after the volume is set). Version 1.8 also remembers your volume: press Apply once and it is restored automatically every time you reconnect the headset.
 
@@ -41,16 +41,29 @@ The vast majority of high end android smartphones sold today do not contain a 3.
  - **No permissions** are declared except `RECORD_AUDIO` (used only to suppress the USB audio-capture warning) and USB host. The app never accesses the network, storage, contacts, location or any other data.
 
 # Automatic (invisible) mode
-Set your volume and press **Apply** once. A successful Apply now saves the volume and enables **Automatic (invisible)** for future connections. On Android's USB dialog for each headphone model, select **"Always use"** / **"Always allow"** when offered. From then on:
+One-time setup:
+ 1. Plug in the headset and open the app. Allow the microphone permission (Android hides the next checkbox for headsets with a mic otherwise).
+ 2. In Android's USB dialog, tick **"Always open USB DAC Volume when ... is connected"** and tap OK.
+ 3. Set your volume and press **Apply**.
+
+The "Always open" choice is the only USB access Android keeps after an unplug. Up to version 1.8 the app's background handler was still disabled when this dialog first appeared, so Android never offered the checkbox and the volume could not be restored without reopening the app. Since 1.9 it is offered on the first prompt (if you missed it, Android offers it again on the next connect).
+
+From then on:
  - You do not need to reopen the app or press Apply each time you connect the headset.
  - The volume is restored silently in the background, even when the app UI is closed or its process has been stopped by Android.
  - The volume is applied exactly once per connection, so the USB reset cannot cause a connect/disconnect loop ("blinking" sound).
- - Settings survive a normal phone restart. Clearing app data, uninstalling the app, or a factory reset removes them.
+ - Settings survive a normal phone restart. Clearing app data, uninstalling the app, or a factory reset removes them (app backup is disabled, so they are not restored from a cloud backup either).
+ - The app shows when the last automatic restore ran and whether it succeeded.
+ - Nothing is written to the headset automatically until you have pressed Apply once.
  - To stop restoring settings automatically, untick both automatic options.
+
+If the status says "no USB permission", the "Always open" choice is missing: in Android Settings > Apps > USB DAC Volume > Open by default (or "Set as default"), clear the defaults, unplug, plug in again and tick "Always open" in the dialog. Microphone access must also not be blocked in quick settings, because Android refuses USB access to headsets with a mic while it is.
 
 Android may still ask which app to use on the next connection if you have not selected this app as the default USB handler. Force-stopping the app in Android Settings can prevent automatic handling until it is opened again. Some phone vendors may also require allowing background activity.
 
-Version 1.8 also fixes the invisible handler's activity lifecycle, keeps permission/boot receivers alive until their USB work finishes, and persists the USB-reset cooldown across process recreation. Failed native volume transfers no longer report a successful save.
+Version 1.8 fixed the invisible handler's activity lifecycle, kept permission/boot receivers alive until their USB work finished, and persisted the USB-reset cooldown across process recreation.
+
+Version 1.9 fixes why the restore still did not happen without opening the app: the background handler was declared disabled, so Android never offered the "Always open" checkbox in the USB dialog and the USB grant was dropped on every unplug. The handler is now enabled from the first launch, automatic restore is on by default, the background write waits for the freshly attached DAC to settle (the same timing a manual Apply has), and the app shows when the last automatic restore ran and whether it succeeded.
 
 **Why the USB dialog still shows up once per device model:** Android only remembers the USB permission per *device* (vendor/product ID), tied to the "Always allow" checkbox. This is an OS security boundary - no app can grant itself this permission or skip the dialog. Tick "Always allow" and it will not appear again for that device. Wired headphones/IEMs that report a different model each get their own one-time prompt. The checkbox is only offered when the app holds the microphone permission, so the app asks for it before requesting USB access (needed because these headsets report an audio capture interface).
 

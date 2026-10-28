@@ -13,7 +13,7 @@
         android:required="true" />
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -33,14 +33,19 @@
         <!--
             Invisible handler for USB device attach events. The system starts
             it when a DAC is plugged in; it never shows a window and finishes
-            immediately. It also makes the app eligible for the "always use"
-            USB permission checkbox. The component is disabled by default and
-            enabled after a successful Apply or while either automatic option
-            is selected. With both options off, a replug launches nothing.
+            as soon as the volume is written.
+
+            It must be enabled from the first launch: Android only offers
+            "Always open this app when the device is connected" in the USB
+            permission dialog while the app has an enabled activity for
+            USB_DEVICE_ATTACHED. That choice is the only persistent USB grant
+            (stored by the system, survives replugs and reboots, cleared by a
+            factory reset or uninstall). Unticking both automatic options
+            disables the component, so a replug then launches nothing.
         -->
         <activity
             android:name="com.example.libusbAndroidTest.UsbAttachActivity"
-            android:enabled="false"
+            android:enabled="true"
             android:excludeFromRecents="true"
             android:exported="true"
             android:noHistory="true"

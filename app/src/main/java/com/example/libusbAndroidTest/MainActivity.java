@@ -18,6 +18,7 @@ import android.hardware.usb.UsbManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.format.DateUtils;
 import android.util.Log;
 import android.view.View;
 import android.widget.CheckBox;
@@ -35,6 +36,7 @@ public class MainActivity extends AppCompatActivity {
     private UsbManager usbManager;
 
     private TextView tv;
+    private TextView autoStatus;
     private EditText volInput;
 
     private CheckBox autoApply;
@@ -97,6 +99,10 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    // Automatic apply while the UI is open waits for the DAC to settle, the
+    // same way the background restore does.
+    private final Runnable autoApplyAfterSettle = () -> applyVolume(false);
+
     private final Runnable reconnectAfterReset = () -> {
         if (!pendingReconnect) {
             return;
@@ -131,6 +137,7 @@ public class MainActivity extends AppCompatActivity {
 
         if (connectedDevice != null && UsbController.isSameDevice(detached, connectedDevice)) {
             handler.removeCallbacks(reconnectAfterReset);
+            handler.removeCallbacks(autoApplyAfterSettle);
             // The device is really gone: clear the once-per-connection guard
             // unconditionally, so the next replug applies the volume again
             // even if the detach event was swallowed by the reset window.
@@ -241,7 +248,8 @@ public class MainActivity extends AppCompatActivity {
                 && UsbController.acquireApply(device);
 
         if (shouldApply) {
-            applyVolume(false);
+            handler.removeCallbacks(autoApplyAfterSettle);
+            handler.postDelayed(autoApplyAfterSettle, UsbController.ATTACH_SETTLE_MS);
         }
     }
 
@@ -291,8 +299,30 @@ public class MainActivity extends AppCompatActivity {
 
         UsbController.rememberVolume(this, volume);
         automatic.setChecked(true);
+        refreshAutoStatus();
         Toast.makeText(getApplicationContext(),
                 "Saved! Volume will restore when you reconnect.", Toast.LENGTH_LONG).show();
+    }
+
+    /** Shows whether, when and how the last background restore ran. */
+    private void refreshAutoStatus() {
+        String text;
+        if (!UsbController.isAutoHandlingWanted(this)) {
+            text = "Automatic restore is off.";
+        } else if (!UsbController.hasSavedVolume(this)) {
+            text = "Press Apply once to save your volume.";
+        } else {
+            long time = UsbController.getLastAutoTime(this);
+            String result = UsbController.getLastAutoResult(this);
+            if (time < 0 || result == null) {
+                text = "Automatic restore: waiting for the next connect.";
+            } else {
+                text = "Last automatic restore: " + DateUtils.formatDateTime(this, time,
+                        DateUtils.FORMAT_SHOW_DATE | DateUtils.FORMAT_SHOW_TIME)
+                        + " (" + result + ")";
+            }
+        }
+        autoStatus.setText(text);
     }
 
     private void checkUsbDevices()
@@ -336,6 +366,7 @@ public class MainActivity extends AppCompatActivity {
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
         tv = binding.sampleText;
+        autoStatus = binding.autoStatus;
         volInput = binding.volume;
         autoApply = binding.autoApply;
         automatic = binding.automatic;
@@ -358,6 +389,12 @@ public class MainActivity extends AppCompatActivity {
         UsbController.setPermissionListener(permissionListener);
 
         requestRecordAudioPermission();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        refreshAutoStatus();
     }
 
     @Override
@@ -409,11 +446,13 @@ public class MainActivity extends AppCompatActivity {
         // Enable the invisible attach handler when "Auto Apply on Start" is on
         // so reconnecting the headphones applies the volume without the popup.
         UsbController.syncAutomaticComponent(this);
+        refreshAutoStatus();
     }
 
     public void automaticCheckboxPressed(View view) {
         boolean enabled = automatic.isChecked();
         UsbController.setAutomatic(this, enabled);
+        refreshAutoStatus();
         if (enabled) {
             // Ask for permission now so the "always use" option can be chosen;
             // from then on everything happens invisible in the background.

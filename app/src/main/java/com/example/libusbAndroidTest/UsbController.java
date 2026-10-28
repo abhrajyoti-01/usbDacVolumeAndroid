@@ -18,6 +18,7 @@ import android.provider.Settings;
 import android.util.Log;
 
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 public final class UsbController {
@@ -32,6 +33,16 @@ public final class UsbController {
 
     // How long a permission request stays pending before it can be retried.
     private static final long PERMISSION_RETRY_MS = 30000;
+
+    // Android's audio stack opens a freshly attached DAC at the same moment the
+    // attach event reaches us. A manual Apply (which always worked) runs on a
+    // settled device, so the background restore waits briefly to match that.
+    static final long ATTACH_SETTLE_MS = 1200;
+
+    private static final String KEY_VOLUME = "volume";
+    private static final String KEY_AUTOMATIC = "automatic";
+    private static final String KEY_LAST_AUTO_TIME = "lastAutoTime";
+    private static final String KEY_LAST_AUTO_RESULT = "lastAutoResult";
 
     private static final Map<Integer, Long> pendingPermissionIds = new HashMap<>();
 
@@ -64,8 +75,18 @@ public final class UsbController {
         return context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
+    /**
+     * Automatic restore is on unless the user switched it off. Defaulting to
+     * on keeps the attach handler enabled from the first launch, which is what
+     * lets Android offer "Always open" in the very first USB permission prompt.
+     */
     public static boolean isAutomatic(Context context) {
-        return prefs(context).getBoolean("automatic", false);
+        return prefs(context).getBoolean(KEY_AUTOMATIC, true);
+    }
+
+    /** True once a volume has been saved by a successful manual Apply. */
+    public static boolean hasSavedVolume(Context context) {
+        return prefs(context).contains(KEY_VOLUME);
     }
 
     public static boolean isAutoApply(Context context) {
@@ -77,9 +98,18 @@ public final class UsbController {
         return isAutomatic(context);
     }
 
-    /** True when the volume should be applied automatically on connect. */
-    public static boolean shouldAutoApply(Context context) {
+    /** True when automatic handling of a connect is wanted at all. */
+    public static boolean isAutoHandlingWanted(Context context) {
         return isAutomatic(context) || isAutoApply(context);
+    }
+
+    /**
+     * True when the volume should be applied automatically on connect. Nothing
+     * is written before the user has saved a volume, so a fresh install never
+     * pushes a default value to the headset on its own.
+     */
+    public static boolean shouldAutoApply(Context context) {
+        return isAutoHandlingWanted(context) && hasSavedVolume(context);
     }
 
     /**
@@ -88,18 +118,19 @@ public final class UsbController {
      * with it disabled plugging a DAC cannot launch anything at all.
      */
     public static void setAutomatic(Context context, boolean enabled) {
-        prefs(context).edit().putBoolean("automatic", enabled).apply();
+        prefs(context).edit().putBoolean(KEY_AUTOMATIC, enabled).apply();
         syncAutomaticComponent(context);
     }
 
     /**
      * Re-applies the attach component state from the stored preferences. The
-     * component is enabled whenever any automatic handling is wanted
-     * (Automatic or Auto Apply on Start), so a replug can apply the volume
-     * even when the app UI is not open.
+     * component is enabled whenever any automatic handling is wanted, even
+     * before a volume is saved: Android only offers "Always open this app when
+     * the device is connected" (the persistent USB grant that survives replugs
+     * and reboots) while the app has an enabled USB_DEVICE_ATTACHED activity.
      */
     public static void syncAutomaticComponent(Context context) {
-        toggleAttachActivity(context, shouldAutoApply(context));
+        toggleAttachActivity(context, isAutoHandlingWanted(context));
     }
 
     private static void toggleAttachActivity(Context context, boolean enabled) {
@@ -117,17 +148,36 @@ public final class UsbController {
     }
 
     public static String getVolumeHex(Context context) {
-        String volume = prefs(context).getString("volume", "0000");
+        String volume = prefs(context).getString(KEY_VOLUME, "0000");
         return (volume != null && volume.matches("[0-9A-Fa-f]{4}")) ? volume : "0000";
     }
 
     /** A successful manual Apply also opts into restoring the saved setting. */
     public static void rememberVolume(Context context, String volume) {
+        // commit(): the value must be on disk before the process can be killed.
         prefs(context).edit()
-                .putString("volume", volume)
-                .putBoolean("automatic", true)
-                .apply();
+                .putString(KEY_VOLUME, volume)
+                .putBoolean(KEY_AUTOMATIC, true)
+                .commit();
         syncAutomaticComponent(context);
+    }
+
+    /** Records the outcome of a background restore so the UI can show it. */
+    static void recordAutoResult(Context context, String result) {
+        prefs(context).edit()
+                .putLong(KEY_LAST_AUTO_TIME, System.currentTimeMillis())
+                .putString(KEY_LAST_AUTO_RESULT, result)
+                .apply();
+        Log.d(TAG, "automatic restore: " + result);
+    }
+
+    /** Wall-clock time of the last background restore attempt, or -1. */
+    public static long getLastAutoTime(Context context) {
+        return prefs(context).getLong(KEY_LAST_AUTO_TIME, -1);
+    }
+
+    public static String getLastAutoResult(Context context) {
+        return prefs(context).getString(KEY_LAST_AUTO_RESULT, null);
     }
 
     public static UsbDevice getUsbDeviceExtra(Intent intent) {
@@ -322,7 +372,13 @@ public final class UsbController {
     }
 
     private static int bootCount(Context context) {
-        return Settings.Global.getInt(context.getContentResolver(), Settings.Global.BOOT_COUNT, -1);
+        // Some builds do not expose BOOT_COUNT. Falling back to -1 would disable
+        // the reset cooldown entirely and let the post-write re-attach trigger
+        // another write (an apply/reset loop). Use a constant instead; the
+        // elapsed-time check still rejects stale values from an earlier boot.
+        int count = Settings.Global.getInt(context.getContentResolver(),
+                Settings.Global.BOOT_COUNT, -1);
+        return count >= 0 ? count : 0;
     }
 
     public static synchronized boolean isInResetWindow(Context context) {
@@ -357,11 +413,34 @@ public final class UsbController {
     }
 
     private static void silentApplyInternal(Context context, UsbDevice device) {
-        if (!hasPermission(context, device) || isInResetWindow(context)) {
+        if (isInResetWindow(context)) {
+            return;
+        }
+        if (!hasPermission(context, device)) {
+            recordAutoResult(context, "skipped: no USB permission");
             return;
         }
         if (!acquireApply(device)) {
             Log.d(TAG, "silentApply: already applied for this connection");
+            return;
+        }
+
+        // Let the audio stack finish opening the freshly attached DAC, then
+        // make sure it is still the same, still-permitted device.
+        SystemClock.sleep(ATTACH_SETTLE_MS);
+        UsbDevice present = findPresentDevice(context, device);
+        if (present == null) {
+            forgetDevice(device);
+            recordAutoResult(context, "skipped: unplugged before restore");
+            return;
+        }
+        if (!hasPermission(context, present)) {
+            forgetDevice(device);
+            recordAutoResult(context, "skipped: no USB permission");
+            return;
+        }
+        if (isInResetWindow(context)) {
+            // Another component wrote the volume while we were waiting.
             return;
         }
 
@@ -373,23 +452,25 @@ public final class UsbController {
 
         UsbDeviceConnection connection = null;
         try {
-            connection = usbManager.openDevice(device);
+            connection = usbManager.openDevice(present);
             if (connection == null || connection.getFileDescriptor() < 0) {
                 forgetDevice(device);
-                Log.e(TAG, "silentApply: openDevice failed");
+                recordAutoResult(context, "failed: could not open the headset");
                 return;
             }
-            byte[] volume = hexStringToByteArray(getVolumeHex(context));
+            String hex = getVolumeHex(context);
+            byte[] volume = hexStringToByteArray(hex);
             beginVolumeWrite(context);
             if (!UsbNative.setDeviceVolume(connection.getFileDescriptor(), volume)) {
                 forgetDevice(device);
-                Log.e(TAG, "silentApply: volume transfer failed");
+                recordAutoResult(context, "failed: headset rejected the volume");
                 return;
             }
-            Log.d(TAG, "silentApply: volume written");
+            recordAutoResult(context, "restored " + hex.toUpperCase(Locale.ROOT));
         } catch (Throwable t) {
             forgetDevice(device);
             Log.e(TAG, "silentApply failed", t);
+            recordAutoResult(context, "failed: " + t.getClass().getSimpleName());
         } finally {
             if (connection != null) {
                 connection.close();
