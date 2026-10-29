@@ -168,7 +168,7 @@ public final class UsbController {
                 .putLong(KEY_LAST_AUTO_TIME, System.currentTimeMillis())
                 .putString(KEY_LAST_AUTO_RESULT, result)
                 .apply();
-        Log.d(TAG, "automatic restore: " + result);
+        EventLog.add(context, "automatic restore: " + result);
     }
 
     /** Wall-clock time of the last background restore attempt, or -1. */
@@ -204,6 +204,13 @@ public final class UsbController {
             }
         }
         return false;
+    }
+
+    /** Vendor/product id and name of a device, for the event log. */
+    static String describe(UsbDevice device) {
+        String name = device.getProductName();
+        return String.format(Locale.ROOT, "%04x:%04x", device.getVendorId(), device.getProductId())
+                + (name != null ? " " + name : "");
     }
 
     public static boolean isSingleAttachedDevice(Context context, UsbDevice device) {
@@ -414,6 +421,7 @@ public final class UsbController {
 
     private static void silentApplyInternal(Context context, UsbDevice device) {
         if (isInResetWindow(context)) {
+            EventLog.add(context, "restore skipped: the app's own volume write is in progress");
             return;
         }
         if (!hasPermission(context, device)) {
@@ -421,7 +429,7 @@ public final class UsbController {
             return;
         }
         if (!acquireApply(device)) {
-            Log.d(TAG, "silentApply: already applied for this connection");
+            EventLog.add(context, "restore skipped: already applied for this connection");
             return;
         }
 
@@ -441,6 +449,7 @@ public final class UsbController {
         }
         if (isInResetWindow(context)) {
             // Another component wrote the volume while we were waiting.
+            EventLog.add(context, "restore skipped: volume was written meanwhile");
             return;
         }
 

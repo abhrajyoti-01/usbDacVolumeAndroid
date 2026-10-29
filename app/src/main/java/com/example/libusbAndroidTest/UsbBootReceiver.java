@@ -58,6 +58,8 @@ public class UsbBootReceiver extends BroadcastReceiver {
             }
             permittedDevices.add(device);
         }
+        EventLog.add(context, "phone restarted: " + permittedDevices.size()
+                + " permitted audio device(s) connected");
         if (permittedDevices.isEmpty()) {
             return;
         }

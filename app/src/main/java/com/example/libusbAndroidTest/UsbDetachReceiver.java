@@ -37,6 +37,7 @@ public class UsbDetachReceiver extends BroadcastReceiver {
             try {
                 if (UsbController.findPresentDevice(appContext, device) == null) {
                     UsbController.forgetDevice(device);
+                    EventLog.add(appContext, "unplugged: " + UsbController.describe(device));
                 }
             } finally {
                 pendingResult.finish();

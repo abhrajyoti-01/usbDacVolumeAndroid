@@ -21,6 +21,7 @@ import android.os.Looper;
 import android.text.format.DateUtils;
 import android.util.Log;
 import android.view.View;
+import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.TextView;
@@ -37,6 +38,7 @@ public class MainActivity extends AppCompatActivity {
 
     private TextView tv;
     private TextView autoStatus;
+    private Button shareReport;
     private EditText volInput;
 
     private CheckBox autoApply;
@@ -276,18 +278,22 @@ public class MainActivity extends AppCompatActivity {
             UsbController.acquireApply(connectedDevice);
         }
 
+        String source = fromUser ? "Apply " : "app open: automatic apply ";
         try {
             if (!UsbNative.setDeviceVolume(deviceDescriptor,
                     UsbController.hexStringToByteArray(volume))) {
+                EventLog.add(this, source + volume + " failed: headset rejected the volume");
                 UsbController.forgetDevice(connectedDevice);
                 volInput.setBackgroundColor(Color.RED);
                 scheduleReconnectAfterReset();
                 return;
             }
+            EventLog.add(this, source + volume + " written");
             volInput.setBackgroundColor(Color.TRANSPARENT);
             scheduleReconnectAfterReset();
         } catch (Throwable t) {
             Log.e(TAG, "applyVolume failed", t);
+            EventLog.add(this, source + volume + " failed: " + t);
             UsbController.forgetDevice(connectedDevice);
             volInput.setBackgroundColor(Color.RED);
             return;
@@ -323,6 +329,14 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         autoStatus.setText(text);
+    }
+
+    /** Shows how many crashes and freezes Android still has on record. */
+    private void refreshShareReport() {
+        int problems = CrashReport.countProblems(this);
+        shareReport.setText(problems > 0
+                ? "Share crash report (" + problems + " recorded)"
+                : "Share crash report");
     }
 
     private void checkUsbDevices()
@@ -367,6 +381,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(binding.getRoot());
         tv = binding.sampleText;
         autoStatus = binding.autoStatus;
+        shareReport = binding.shareReport;
         volInput = binding.volume;
         autoApply = binding.autoApply;
         automatic = binding.automatic;
@@ -395,6 +410,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         refreshAutoStatus();
+        refreshShareReport();
     }
 
     @Override
@@ -437,6 +453,36 @@ public class MainActivity extends AppCompatActivity {
 
     public void applyButtonPressed(View view) {
         applyVolume(true);
+    }
+
+    public void shareReportPressed(View view) {
+        Context appContext = getApplicationContext();
+        shareReport.setEnabled(false);
+        // Reading the system's crash traces can take a moment: not on the UI thread.
+        new Thread(() -> {
+            String report;
+            try {
+                report = CrashReport.build(appContext);
+            } catch (Throwable t) {
+                Log.e(TAG, "building the crash report failed", t);
+                report = "Building the crash report failed: " + t;
+            }
+            String text = report;
+            handler.post(() -> {
+                shareReport.setEnabled(true);
+                Intent send = new Intent(Intent.ACTION_SEND)
+                        .setType("text/plain")
+                        .putExtra(Intent.EXTRA_SUBJECT, "USB DAC Volume crash report")
+                        .putExtra(Intent.EXTRA_TEXT, text);
+                try {
+                    startActivity(Intent.createChooser(send, "Share crash report"));
+                } catch (RuntimeException e) {
+                    Log.e(TAG, "sharing the crash report failed", e);
+                    Toast.makeText(appContext, "Could not open the share menu",
+                            Toast.LENGTH_LONG).show();
+                }
+            });
+        }, "crash-report").start();
     }
 
     public void checkboxPressed(View view) {

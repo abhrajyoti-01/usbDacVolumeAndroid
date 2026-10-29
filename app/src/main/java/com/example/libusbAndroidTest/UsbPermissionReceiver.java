@@ -29,12 +29,12 @@ public class UsbPermissionReceiver extends BroadcastReceiver {
         UsbController.clearRequested(device);
 
         boolean granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false);
-        if (!granted) {
-            Log.d(TAG, "permission denied for device " + device);
-        }
         if (device == null) {
+            Log.d(TAG, "permission result without a device");
             return;
         }
+        EventLog.add(context, "USB permission " + (granted ? "granted" : "denied")
+                + " for " + UsbController.describe(device));
 
         final Context appContext = context.getApplicationContext();
         UsbController.PermissionListener listener = UsbController.getPermissionListener();

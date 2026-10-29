@@ -2,7 +2,7 @@
 
 Simple application to set the USB DAC volume on UNROOTED Android Devices
 
-[DOWNLOAD](https://github.com/abhrajyoti-01/usbDacVolumeAndroid/releases/download/release-1.9/app-release.apk)
+[DOWNLOAD](https://github.com/abhrajyoti-01/usbDacVolumeAndroid/releases/download/release-1.10/app-release.apk)
 
 > **This fork** fixes Samsung Galaxy S24 Ultra / Android 15-16 (One UI 7/8) compatibility, including the permission/relaunch crash loop and the "no sound after Apply" problem (the kernel `snd-usb-audio` driver is now re-attached by resetting the DAC after the volume is set). Version 1.8 also remembers your volume: press Apply once and it is restored automatically every time you reconnect the headset.
 
@@ -64,6 +64,10 @@ Android may still ask which app to use on the next connection if you have not se
 Version 1.8 fixed the invisible handler's activity lifecycle, kept permission/boot receivers alive until their USB work finished, and persisted the USB-reset cooldown across process recreation.
 
 Version 1.9 fixes why the restore still did not happen without opening the app: the background handler was declared disabled, so Android never offered the "Always open" checkbox in the USB dialog and the USB grant was dropped on every unplug. The handler is now enabled from the first launch, automatic restore is on by default, the background write waits for the freshly attached DAC to settle (the same timing a manual Apply has), and the app shows when the last automatic restore ran and whether it succeeded.
+
+**If the volume suddenly stops being restored on a Samsung phone:** Device care puts an app that crashed several times into *Deep sleeping apps*. A deep-sleeping app is not started when the headset is plugged in, so nothing is restored and no dialog appears. Remove it in Settings > Battery > Background usage limits > Deep sleeping apps, and set Settings > Apps > USB DAC Volume > Battery to *Unrestricted*.
+
+**Crash report (since 1.10):** the *Share crash report* button sends Android's own records of the app's recent crashes and freezes (with the stack traces Android kept), the phone model and Android version, and a short log of what the app did on each connect. Nothing is sent automatically; you choose where to share it.
 
 **Why the USB dialog still shows up once per device model:** Android only remembers the USB permission per *device* (vendor/product ID), tied to the "Always allow" checkbox. This is an OS security boundary - no app can grant itself this permission or skip the dialog. Tick "Always allow" and it will not appear again for that device. Wired headphones/IEMs that report a different model each get their own one-time prompt. The checkbox is only offered when the app holds the microphone permission, so the app asks for it before requesting USB access (needed because these headsets report an audio capture interface).
 
